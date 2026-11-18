@@ -1,0 +1,49 @@
+{
+  "name": "Caducidad automática y reactivación quitando la caducidad",
+  "actors": {
+    "mago": { "role": "mago" },
+    "helper": { "role": "helper" }
+  },
+  "steps": [
+    { "actor": "mago", "hello": {} },
+    { "actor": "mago", "expect": { "t": "welcome" } },
+
+    { "comment": "Caducidad en el pasado: se rechaza", "actor": "mago", "send": { "t": "session.create", "id": "c-0", "name": "Mala", "expiresAt": 1000 } },
+    { "actor": "mago", "expect": { "t": "error", "ref": "c-0", "code": "bad_message" } },
+
+    { "actor": "mago", "send": { "t": "session.create", "id": "c-1", "name": "Caduca pronto", "expiresAt": "$now+1500" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-1", "session": { "id": "$>sid", "status": "paused" } } },
+    { "actor": "mago", "expect": { "t": "pairing", "ref": "c-1", "code": "$>code" } },
+    { "actor": "helper", "join": { "code": "$code", "label": "Ayudante" }, "expectHttp": { "status": 200, "body": { "requestId": "$>rid" } } },
+    { "actor": "mago", "expect": { "t": "pairing.request", "request": { "requestId": "$rid" } } },
+    { "actor": "helper", "hello": {} },
+    { "actor": "helper", "expect": { "t": "welcome" } },
+    { "actor": "mago", "send": { "t": "pairing.accept", "id": "c-2", "requestId": "$rid" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-2" } },
+    { "actor": "helper", "expect": { "t": "pairing.result", "accepted": true } },
+    { "actor": "helper", "expect": { "t": "session" } },
+    { "actor": "mago", "send": { "t": "session.activate", "id": "c-3", "sessionId": "$sid" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-3", "session": { "status": "active" } } },
+    { "actor": "mago", "expect": { "t": "state", "sessionId": "$sid" } },
+    { "actor": "helper", "expect": { "t": "session", "session": { "status": "active" } } },
+    { "actor": "helper", "expect": { "t": "state", "sessionId": "$sid" } },
+
+    { "comment": "Pasa el tiempo: la alarma del Durable Object la marca como caducada", "sleep": 2500 },
+    { "actor": "mago", "expect": { "t": "session", "session": { "id": "$sid", "status": "expired" } } },
+    { "actor": "helper", "expect": { "t": "session", "session": { "id": "$sid", "status": "expired" } } },
+
+    { "actor": "helper", "send": { "t": "patch", "id": "h-1", "sessionId": "$sid", "patch": { "a": 1 } } },
+    { "actor": "helper", "expect": { "t": "error", "ref": "h-1", "code": "expired" } },
+    { "actor": "mago", "send": { "t": "session.activate", "id": "c-4", "sessionId": "$sid" } },
+    { "actor": "mago", "expect": { "t": "error", "ref": "c-4", "code": "expired" } },
+
+    { "comment": "Quitar la caducidad la devuelve a pausada; se puede reactivar", "actor": "mago", "send": { "t": "session.update", "id": "c-5", "sessionId": "$sid", "expiresAt": null } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-5", "session": { "status": "paused", "expiresAt": null } } },
+    { "actor": "helper", "expect": { "t": "session", "session": { "status": "paused" } } },
+    { "actor": "mago", "send": { "t": "session.activate", "id": "c-6", "sessionId": "$sid" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-6", "session": { "status": "active" } } },
+    { "actor": "mago", "expect": { "t": "state", "sessionId": "$sid" } },
+    { "actor": "helper", "expect": { "t": "session", "session": { "status": "active" } } },
+    { "actor": "helper", "expect": { "t": "state", "sessionId": "$sid" } }
+  ]
+}

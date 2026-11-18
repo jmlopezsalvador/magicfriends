@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "magicfriends",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "durable_objects": {
+    "bindings": [
+      { "name": "MAGO", "class_name": "MagoDO" },
+      { "name": "DIRECTORY", "class_name": "DirectoryDO" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["MagoDO", "DirectoryDO"] }
+  ]
+}

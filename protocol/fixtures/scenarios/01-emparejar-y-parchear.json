@@ -1,0 +1,55 @@
+{
+  "name": "Emparejar, activar, parchear y reconectar",
+  "actors": {
+    "mago": { "role": "mago" },
+    "helper": { "role": "helper" }
+  },
+  "steps": [
+    { "actor": "mago", "hello": {} },
+    { "actor": "mago", "expect": { "t": "welcome", "role": "mago", "sessions": [], "pending": [] } },
+
+    { "actor": "mago", "send": { "t": "session.create", "id": "c-1", "name": "Función del sábado", "expiresAt": null } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-1", "session": { "id": "$>sid", "name": "Función del sábado", "status": "paused", "hasController": false, "rev": 0, "expiresAt": null } } },
+    { "actor": "mago", "expect": { "t": "pairing", "ref": "c-1", "sessionId": "$sid", "code": "$>code", "expiresAt": "$any" } },
+
+    { "actor": "helper", "join": { "code": "$code", "label": "Ayudante" },
+      "expectHttp": { "status": 200, "body": { "requestId": "$>rid", "magoId": "$any" } } },
+    { "actor": "mago", "expect": { "t": "pairing.request", "request": { "requestId": "$rid", "sessionId": "$sid", "label": "Ayudante" } } },
+
+    { "actor": "helper", "hello": {} },
+    { "actor": "helper", "expect": { "t": "welcome", "role": "helper", "sessions": [], "pending": [ { "requestId": "$rid", "sessionId": "$sid" } ] } },
+
+    { "actor": "mago", "send": { "t": "pairing.accept", "id": "c-2", "requestId": "$rid" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-2", "session": { "id": "$sid", "hasController": true, "controllerLabel": "Ayudante", "status": "paused" } } },
+    { "actor": "helper", "expect": { "t": "pairing.result", "requestId": "$rid", "accepted": true, "sessionId": "$sid" } },
+    { "actor": "helper", "expect": { "t": "session", "session": { "id": "$sid", "hasController": true } } },
+
+    { "actor": "mago", "send": { "t": "session.activate", "id": "c-3", "sessionId": "$sid" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-3", "session": { "id": "$sid", "status": "active" } } },
+    { "actor": "mago", "expect": { "t": "state", "sessionId": "$sid", "rev": 0, "settings": {} } },
+    { "actor": "helper", "expect": { "t": "session", "session": { "id": "$sid", "status": "active" } } },
+    { "actor": "helper", "expect": { "t": "state", "sessionId": "$sid", "rev": 0, "settings": {} } },
+
+    { "actor": "helper", "send": { "t": "patch", "id": "h-1", "sessionId": "$sid", "patch": { "forceMode": "target", "forcedCs": 4250 } } },
+    { "actor": "helper", "expect": { "t": "ack", "ref": "h-1", "rev": 1 } },
+    { "actor": "mago", "expect": { "t": "patch", "sessionId": "$sid", "rev": 1, "prevRev": 0, "patch": { "forceMode": "target", "forcedCs": 4250 } } },
+
+    { "actor": "helper", "send": { "t": "patch", "id": "h-2", "sessionId": "$sid", "patch": { "forcedCs": null, "stopSubmode": "centis" } } },
+    { "actor": "helper", "expect": { "t": "ack", "ref": "h-2", "rev": 2 } },
+    { "actor": "mago", "expect": { "t": "patch", "sessionId": "$sid", "rev": 2, "prevRev": 1, "patch": { "forcedCs": null, "stopSubmode": "centis" } } },
+
+    { "comment": "El merge patch quita las claves a null", "actor": "mago", "send": { "t": "sync", "id": "c-4", "sessionId": "$sid" } },
+    { "actor": "mago", "expect": { "t": "state", "ref": "c-4", "sessionId": "$sid", "rev": 2, "settings": { "forceMode": "target", "stopSubmode": "centis", "forcedCs": "$absent" } } },
+
+    { "actor": "mago", "send": { "t": "ping", "id": "c-5" } },
+    { "actor": "mago", "expect": { "t": "pong", "ref": "c-5" } },
+
+    { "comment": "El mago se cae y el ayudante sigue cambiando valores", "actor": "mago", "close": true },
+    { "actor": "helper", "send": { "t": "patch", "id": "h-3", "sessionId": "$sid", "patch": { "forcedCs": 1000 } } },
+    { "actor": "helper", "expect": { "t": "ack", "ref": "h-3", "rev": 3 } },
+
+    { "comment": "Al reconectar, el mago recibe el estado porque su rev conocida (2) es antigua", "actor": "mago", "hello": { "knownRevs": { "$sid": 2 } } },
+    { "actor": "mago", "expect": { "t": "welcome", "role": "mago", "sessions": [ { "id": "$sid", "status": "active", "rev": 3 } ], "pending": [] } },
+    { "actor": "mago", "expect": { "t": "state", "sessionId": "$sid", "rev": 3, "settings": { "forceMode": "target", "stopSubmode": "centis", "forcedCs": 1000 } } }
+  ]
+}

@@ -1,0 +1,341 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jmlopezsalvador/magicfriends/protocol/schema/messages.schema.json",
+  "title": "Magic Friends — mensajes del protocolo v1",
+  "description": "Fuente de verdad del contrato. Cambios solo aditivos: los campos desconocidos se ignoran (por eso no hay additionalProperties:false).",
+  "anyOf": [
+    { "$ref": "#/$defs/ClientMessage" },
+    { "$ref": "#/$defs/ServerMessage" }
+  ],
+  "$defs": {
+    "MsgId": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,64}$" },
+    "DeviceId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{16,64}$" },
+    "DeviceKey": { "type": "string", "pattern": "^[A-Za-z0-9_-]{32,128}$" },
+    "SessionId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{8,64}$" },
+    "RequestId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{8,64}$" },
+    "PairingCode": {
+      "description": "6 caracteres de un alfabeto de 31 símbolos (sin 0, O, 1, I, L), en mayúsculas.",
+      "type": "string",
+      "pattern": "^[2-9A-HJKMNP-Z]{6}$"
+    },
+    "Name": { "type": "string", "minLength": 1, "maxLength": 60 },
+    "Label": { "type": "string", "minLength": 1, "maxLength": 40 },
+    "EpochMs": { "type": "integer", "minimum": 0 },
+    "Rev": { "type": "integer", "minimum": 0 },
+    "JsonObject": { "type": "object" },
+    "Status": { "enum": ["active", "paused", "expired", "revoked"] },
+    "ErrorCode": {
+      "enum": [
+        "bad_auth", "forbidden", "not_found", "not_active", "expired", "too_large",
+        "rate_limited", "bad_message", "bad_code", "unsupported_version", "limit_reached"
+      ]
+    },
+
+    "Envelope": {
+      "type": "object",
+      "required": ["v", "t"],
+      "properties": {
+        "v": { "const": 1 },
+        "t": { "type": "string" },
+        "id": { "$ref": "#/$defs/MsgId" },
+        "ref": { "$ref": "#/$defs/MsgId" }
+      }
+    },
+
+    "Session": {
+      "type": "object",
+      "required": ["id", "name", "status", "expiresAt", "hasController", "rev", "createdAt", "updatedAt"],
+      "properties": {
+        "id": { "$ref": "#/$defs/SessionId" },
+        "name": { "$ref": "#/$defs/Name" },
+        "status": { "$ref": "#/$defs/Status" },
+        "expiresAt": { "oneOf": [{ "$ref": "#/$defs/EpochMs" }, { "type": "null" }] },
+        "hasController": { "type": "boolean" },
+        "controllerLabel": { "oneOf": [{ "$ref": "#/$defs/Label" }, { "type": "null" }] },
+        "rev": { "$ref": "#/$defs/Rev" },
+        "createdAt": { "$ref": "#/$defs/EpochMs" },
+        "updatedAt": { "$ref": "#/$defs/EpochMs" }
+      }
+    },
+
+    "PendingRequest": {
+      "type": "object",
+      "required": ["requestId", "sessionId", "at"],
+      "properties": {
+        "requestId": { "$ref": "#/$defs/RequestId" },
+        "sessionId": { "$ref": "#/$defs/SessionId" },
+        "label": { "oneOf": [{ "$ref": "#/$defs/Label" }, { "type": "null" }] },
+        "at": { "$ref": "#/$defs/EpochMs" }
+      }
+    },
+
+    "ClientMessage": {
+      "oneOf": [
+        { "$ref": "#/$defs/c_hello" },
+        { "$ref": "#/$defs/c_session_create" },
+        { "$ref": "#/$defs/c_pairing_code" },
+        { "$ref": "#/$defs/c_pairing_accept" },
+        { "$ref": "#/$defs/c_pairing_reject" },
+        { "$ref": "#/$defs/c_session_activate" },
+        { "$ref": "#/$defs/c_session_pause" },
+        { "$ref": "#/$defs/c_session_revoke" },
+        { "$ref": "#/$defs/c_session_update" },
+        { "$ref": "#/$defs/c_session_delete" },
+        { "$ref": "#/$defs/c_patch" },
+        { "$ref": "#/$defs/c_sync" },
+        { "$ref": "#/$defs/c_ping" }
+      ]
+    },
+
+    "c_hello": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "properties": {
+          "t": { "const": "hello" },
+          "role": { "enum": ["mago", "helper"] },
+          "deviceId": { "$ref": "#/$defs/DeviceId" },
+          "deviceKey": { "$ref": "#/$defs/DeviceKey" },
+          "knownRevs": {
+            "description": "Opcional: última rev conocida por sesión; el servidor omite el state si coincide.",
+            "type": "object",
+            "additionalProperties": { "$ref": "#/$defs/Rev" }
+          }
+        },
+        "required": ["role", "deviceId", "deviceKey"]
+      }]
+    },
+    "c_session_create": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "properties": {
+          "t": { "const": "session.create" },
+          "name": { "$ref": "#/$defs/Name" },
+          "expiresAt": { "oneOf": [{ "$ref": "#/$defs/EpochMs" }, { "type": "null" }] }
+        },
+        "required": ["id", "name"]
+      }]
+    },
+    "c_pairing_code": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "properties": { "t": { "const": "pairing.code" }, "sessionId": { "$ref": "#/$defs/SessionId" } },
+        "required": ["id", "sessionId"]
+      }]
+    },
+    "c_pairing_accept": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "properties": { "t": { "const": "pairing.accept" }, "requestId": { "$ref": "#/$defs/RequestId" } },
+        "required": ["id", "requestId"]
+      }]
+    },
+    "c_pairing_reject": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "properties": { "t": { "const": "pairing.reject" }, "requestId": { "$ref": "#/$defs/RequestId" } },
+        "required": ["id", "requestId"]
+      }]
+    },
+    "c_session_activate": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "properties": { "t": { "const": "session.activate" }, "sessionId": { "$ref": "#/$defs/SessionId" } },
+        "required": ["id", "sessionId"]
+      }]
+    },
+    "c_session_pause": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "properties": { "t": { "const": "session.pause" }, "sessionId": { "$ref": "#/$defs/SessionId" } },
+        "required": ["id", "sessionId"]
+      }]
+    },
+    "c_session_revoke": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "properties": { "t": { "const": "session.revoke" }, "sessionId": { "$ref": "#/$defs/SessionId" } },
+        "required": ["id", "sessionId"]
+      }]
+    },
+    "c_session_update": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "properties": {
+          "t": { "const": "session.update" },
+          "sessionId": { "$ref": "#/$defs/SessionId" },
+          "name": { "$ref": "#/$defs/Name" },
+          "expiresAt": { "oneOf": [{ "$ref": "#/$defs/EpochMs" }, { "type": "null" }] }
+        },
+        "required": ["id", "sessionId"]
+      }]
+    },
+    "c_session_delete": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "properties": { "t": { "const": "session.delete" }, "sessionId": { "$ref": "#/$defs/SessionId" } },
+        "required": ["id", "sessionId"]
+      }]
+    },
+    "c_patch": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "description": "Helper → servidor. JSON Merge Patch (RFC 7396): null quita la clave, los arrays se sustituyen enteros.",
+        "properties": {
+          "t": { "const": "patch" },
+          "sessionId": { "$ref": "#/$defs/SessionId" },
+          "patch": { "$ref": "#/$defs/JsonObject" }
+        },
+        "required": ["id", "sessionId", "patch"]
+      }]
+    },
+    "c_sync": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "properties": { "t": { "const": "sync" }, "sessionId": { "$ref": "#/$defs/SessionId" } },
+        "required": ["id", "sessionId"]
+      }]
+    },
+    "c_ping": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "properties": { "t": { "const": "ping" } }
+      }]
+    },
+
+    "ServerMessage": {
+      "oneOf": [
+        { "$ref": "#/$defs/s_welcome" },
+        { "$ref": "#/$defs/s_ack" },
+        { "$ref": "#/$defs/s_error" },
+        { "$ref": "#/$defs/s_state" },
+        { "$ref": "#/$defs/s_patch" },
+        { "$ref": "#/$defs/s_session" },
+        { "$ref": "#/$defs/s_session_removed" },
+        { "$ref": "#/$defs/s_pairing" },
+        { "$ref": "#/$defs/s_pairing_request" },
+        { "$ref": "#/$defs/s_pairing_result" },
+        { "$ref": "#/$defs/s_pong" }
+      ]
+    },
+
+    "s_welcome": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "properties": {
+          "t": { "const": "welcome" },
+          "role": { "enum": ["mago", "helper"] },
+          "serverTime": { "$ref": "#/$defs/EpochMs" },
+          "sessions": { "type": "array", "items": { "$ref": "#/$defs/Session" } },
+          "pending": { "type": "array", "items": { "$ref": "#/$defs/PendingRequest" } }
+        },
+        "required": ["role", "serverTime", "sessions", "pending"]
+      }]
+    },
+    "s_ack": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "properties": { "t": { "const": "ack" }, "rev": { "$ref": "#/$defs/Rev" } },
+        "required": ["ref"]
+      }]
+    },
+    "s_error": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "properties": {
+          "t": { "const": "error" },
+          "code": { "$ref": "#/$defs/ErrorCode" },
+          "message": { "type": "string" }
+        },
+        "required": ["code", "message"]
+      }]
+    },
+    "s_state": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "description": "Instantánea completa de los ajustes de una sesión.",
+        "properties": {
+          "t": { "const": "state" },
+          "sessionId": { "$ref": "#/$defs/SessionId" },
+          "rev": { "$ref": "#/$defs/Rev" },
+          "settings": { "$ref": "#/$defs/JsonObject" }
+        },
+        "required": ["sessionId", "rev", "settings"]
+      }]
+    },
+    "s_patch": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "description": "Servidor → mago. Si prevRev no es la rev local, pedir sync.",
+        "properties": {
+          "t": { "const": "patch" },
+          "sessionId": { "$ref": "#/$defs/SessionId" },
+          "rev": { "$ref": "#/$defs/Rev" },
+          "prevRev": { "$ref": "#/$defs/Rev" },
+          "patch": { "$ref": "#/$defs/JsonObject" }
+        },
+        "required": ["sessionId", "rev", "prevRev", "patch"]
+      }]
+    },
+    "s_session": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "properties": { "t": { "const": "session" }, "session": { "$ref": "#/$defs/Session" } },
+        "required": ["session"]
+      }]
+    },
+    "s_session_removed": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "properties": {
+          "t": { "const": "session.removed" },
+          "sessionId": { "$ref": "#/$defs/SessionId" },
+          "reason": { "enum": ["deleted", "revoked", "replaced"] }
+        },
+        "required": ["sessionId", "reason"]
+      }]
+    },
+    "s_pairing": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "description": "Código de emparejamiento de un solo uso. Responde a session.create o pairing.code.",
+        "properties": {
+          "t": { "const": "pairing" },
+          "sessionId": { "$ref": "#/$defs/SessionId" },
+          "code": { "$ref": "#/$defs/PairingCode" },
+          "expiresAt": { "$ref": "#/$defs/EpochMs" }
+        },
+        "required": ["sessionId", "code", "expiresAt"]
+      }]
+    },
+    "s_pairing_request": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "properties": { "t": { "const": "pairing.request" }, "request": { "$ref": "#/$defs/PendingRequest" } },
+        "required": ["request"]
+      }]
+    },
+    "s_pairing_result": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "description": "Servidor → ayudante: el mago aceptó o rechazó su solicitud.",
+        "properties": {
+          "t": { "const": "pairing.result" },
+          "requestId": { "$ref": "#/$defs/RequestId" },
+          "accepted": { "type": "boolean" },
+          "sessionId": { "$ref": "#/$defs/SessionId" }
+        },
+        "required": ["requestId", "accepted"]
+      }]
+    },
+    "s_pong": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "properties": { "t": { "const": "pong" } }
+      }]
+    },
+
+    "JoinRequestBody": {
+      "description": "Cuerpo de POST /v1/join.",
+      "type": "object",
+      "required": ["code", "deviceId", "deviceKey"],
+      "properties": {
+        "code": { "$ref": "#/$defs/PairingCode" },
+        "deviceId": { "$ref": "#/$defs/DeviceId" },
+        "deviceKey": { "$ref": "#/$defs/DeviceKey" },
+        "label": { "$ref": "#/$defs/Label" }
+      }
+    },
+    "JoinResponseBody": {
+      "type": "object",
+      "required": ["magoId", "requestId"],
+      "properties": {
+        "magoId": { "$ref": "#/$defs/DeviceId" },
+        "requestId": { "$ref": "#/$defs/RequestId" }
+      }
+    },
+    "HttpErrorBody": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "$ref": "#/$defs/ErrorCode" },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

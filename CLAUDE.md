@@ -21,6 +21,13 @@ No re-discutir lo decidido; ante un choque, consultar al usuario.
 - No inventar funcionalidad: la fuente de verdad es `docs/DISENO.md` y lo que pida el usuario. Ante la duda, preguntar.
 - Mantener este `CLAUDE.md` y `docs/DISENO.md` al día en la misma tarea en que cambien las decisiones.
 
+## Comandos (fase 0)
+- Servidor en local: `cd server && npm install && npx wrangler dev` (puerto 8787).
+- Tests del servidor: `cd server && npm test` (schema/fixtures en Node + escenarios en el runtime de Workers).
+- Cliente de consola (con el servidor en marcha): `node tools/cli/mf.ts mago` y, en otra terminal, `node tools/cli/mf.ts ayudante`;
+  la identidad de cada perfil se guarda en `~/.magicfriends-cli/` (fuera del repo).
+- Formato de los escenarios de `protocol/fixtures/scenarios/`: ver el final de `protocol/PROTOCOLO.md`.
+
 ## Relación con las apps
 Cada app (carpeta hermana, p. ej. `C:\Users\jmlop\Chronix`) consume `client/` con `includeBuild("../magicfriends/client")`.
 La integración en cada app (solapado de ajustes, pantalla de controlador, instrucciones) se hace en la sesión de esa app,

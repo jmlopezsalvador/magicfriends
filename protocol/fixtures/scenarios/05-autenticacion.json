@@ -1,0 +1,27 @@
+{
+  "name": "Autenticación: clave del mago, ayudante desconocido y códigos inválidos",
+  "actors": {
+    "mago": { "role": "mago" },
+    "intruso": { "role": "mago", "as": "mago", "key": "clave_incorrecta_clave_incorrecta_clave_incorrecta" },
+    "desconocido": { "role": "helper", "mago": "mago" }
+  },
+  "steps": [
+    { "comment": "El primer hello registra la clave del mago (trust on first use)", "actor": "mago", "hello": {} },
+    { "actor": "mago", "expect": { "t": "welcome" } },
+
+    { "actor": "intruso", "hello": {} },
+    { "actor": "intruso", "expect": { "t": "error", "code": "bad_auth" } },
+    { "actor": "intruso", "expectClose": true },
+
+    { "actor": "desconocido", "hello": {} },
+    { "actor": "desconocido", "expect": { "t": "error", "code": "bad_auth" } },
+    { "actor": "desconocido", "expectClose": true },
+
+    { "comment": "Código con formato válido pero que no existe", "actor": "desconocido", "join": { "code": "ZZZZZZ" },
+      "expectHttp": { "status": 404, "body": { "code": "bad_code" } } },
+    { "comment": "Código con formato inválido", "actor": "desconocido", "join": { "code": "abc" },
+      "expectHttp": { "status": 400, "body": { "code": "bad_message" } } },
+
+    { "comment": "El mago sigue conectado y no ha recibido nada raro", "actor": "mago", "expectNothing": true }
+  ]
+}

@@ -21,6 +21,12 @@ conoce los ajustes de ninguna app, solo guarda y reenvía JSON.
    (ojo: los proyectos gratuitos se pausan tras 1 semana sin actividad). Firebase descartado (sin SDK KMP oficial).
    Vercel no sirve de servidor WebSocket. **Verificar límites vigentes en la web de Cloudflare antes de depender de ellos.**
 5. **Repo propio** (`magicfriends`) y **sesión de Claude propia** para esta parte. Las apps solo integran.
+6. **Protocolo v1** (validado 2026-11-18, detalle en `protocol/PROTOCOLO.md`): WebSocket JSON con `hello` y mensajes
+   con `id`/`ref`; `POST /v1/join` para canjear el código. Identidad anónima `deviceId` + `deviceKey` (el servidor solo
+   guarda el hash). Un **Directory DO singleton** traduce código → mago (no guarda ajustes ni sesiones; limita intentos
+   por IP). `expired` es **reversible** (quitar o alargar la caducidad la devuelve a `paused`); `revoked` es definitivo.
+   Se puede **re-emparejar** una sesión: un código nuevo, al aceptarlo, sustituye al ayudante anterior. Código de
+   emparejamiento: 6 caracteres de un alfabeto de 31 símbolos (sin 0, O, 1, I, L), un solo uso, 10 min.
 
 ## Modelo de ajustes: local, remoto y efectivo (lado app)
 
@@ -49,19 +55,22 @@ conoce los ajustes de ninguna app, solo guarda y reenvía JSON.
 - Límite de intentos sobre el código. El payload son números; no hace falta cifrado extremo a extremo.
 - **Nunca subir secretos al repo** (tokens de Cloudflare, `.dev.vars`): el repo es público de forma temporal.
 
-## Arquitectura del servidor (a validar en la fase 0)
+## Arquitectura del servidor (validada en la fase 0)
 
-Propuesta: **un Durable Object por mago** (no por sesión). Contiene en su SQLite la lista de sesiones (nombre, caducidad,
-estado, controlador) y el último ajuste de cada una. Así la regla «una sola activa» es una invariante local del objeto y no
-hace falta coordinar entre objetos. Máximo dos WebSockets simultáneos (mago y controlador activo). Usar la API de
-*WebSocket Hibernation*.
+**Un Durable Object por mago** (`MagoDO`, no por sesión). Contiene en su SQLite la lista de sesiones (nombre, caducidad,
+estado, controlador) y el último ajuste de cada una. La regla «una sola activa» es una invariante local, garantizada por
+un índice único parcial (`WHERE status = 'active'`). Usa la API de *WebSocket Hibernation* y una `alarm()` para la
+caducidad. Un solo mago conectado y como mucho 3 conexiones de ayudante (una por dispositivo; una nueva sustituye a la anterior).
+Además, un `DirectoryDO` singleton para los códigos de emparejamiento (ver decisión 6).
+Verificado: tests en el runtime de Workers (`server/test`, Miniflare) y `wrangler dev` con el CLI de consola.
 
 ## Estructura del repo y compatibilidad
 
 ```
 protocol/   especificación, JSON Schemas y fixtures (mensajes de ejemplo)  ← fuente de verdad
-server/     Cloudflare Worker + Durable Object (TypeScript, wrangler)
+server/     Cloudflare Worker + Durable Objects (TypeScript, wrangler)
 client/     librería KMP (commonMain con Ktor; androidMain/iosMain solo si hace falta)
+tools/cli/  cliente de pruebas por consola (Node, sin dependencias)
 docs/
 ```
 
@@ -94,5 +103,4 @@ docs/
   2026-11-18: el Actions de iOS de Chronix es gratuito solo en repos públicos), así que el checkout no necesita
   credenciales. **Al terminar, pasar a privado Chronix y magicfriends a la vez**; a partir de ahí un workflow de Chronix
   necesitaría un token de solo lectura (PAT o deploy key, como secreto del repo) para clonar `magicfriends`.
-- Forma exacta del protocolo de mensajes (a definir en la fase 0).
 - `showTotals`: ¿remoto o no?

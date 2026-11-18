@@ -1,0 +1,85 @@
+{
+  "name": "Una sola sesión activa, permisos, revocar y borrar",
+  "actors": {
+    "mago": { "role": "mago" },
+    "helper1": { "role": "helper" },
+    "helper2": { "role": "helper" }
+  },
+  "steps": [
+    { "actor": "mago", "hello": {} },
+    { "actor": "mago", "expect": { "t": "welcome", "sessions": [], "pending": [] } },
+
+    { "actor": "mago", "send": { "t": "session.create", "id": "c-1", "name": "Sesión 1" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-1", "session": { "id": "$>sid1" } } },
+    { "actor": "mago", "expect": { "t": "pairing", "ref": "c-1", "code": "$>code1" } },
+    { "actor": "mago", "send": { "t": "session.create", "id": "c-2", "name": "Sesión 2" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-2", "session": { "id": "$>sid2" } } },
+    { "actor": "mago", "expect": { "t": "pairing", "ref": "c-2", "code": "$>code2" } },
+
+    { "actor": "helper1", "join": { "code": "$code1", "label": "Uno" }, "expectHttp": { "status": 200, "body": { "requestId": "$>rid1" } } },
+    { "actor": "mago", "expect": { "t": "pairing.request", "request": { "requestId": "$rid1", "sessionId": "$sid1" } } },
+    { "actor": "helper2", "join": { "code": "$code2", "label": "Dos" }, "expectHttp": { "status": 200, "body": { "requestId": "$>rid2" } } },
+    { "actor": "mago", "expect": { "t": "pairing.request", "request": { "requestId": "$rid2", "sessionId": "$sid2" } } },
+
+    { "actor": "helper1", "hello": {} },
+    { "actor": "helper1", "expect": { "t": "welcome", "sessions": [], "pending": [ { "requestId": "$rid1" } ] } },
+    { "actor": "helper2", "hello": {} },
+    { "actor": "helper2", "expect": { "t": "welcome", "sessions": [], "pending": [ { "requestId": "$rid2" } ] } },
+
+    { "actor": "mago", "send": { "t": "pairing.accept", "id": "c-3", "requestId": "$rid1" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-3", "session": { "id": "$sid1", "hasController": true } } },
+    { "actor": "helper1", "expect": { "t": "pairing.result", "accepted": true } },
+    { "actor": "helper1", "expect": { "t": "session", "session": { "id": "$sid1" } } },
+    { "actor": "mago", "send": { "t": "pairing.accept", "id": "c-4", "requestId": "$rid2" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-4", "session": { "id": "$sid2", "hasController": true } } },
+    { "actor": "helper2", "expect": { "t": "pairing.result", "accepted": true } },
+    { "actor": "helper2", "expect": { "t": "session", "session": { "id": "$sid2" } } },
+
+    { "actor": "mago", "send": { "t": "session.activate", "id": "c-5", "sessionId": "$sid1" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-5", "session": { "id": "$sid1", "status": "active" } } },
+    { "actor": "mago", "expect": { "t": "state", "sessionId": "$sid1", "rev": 0 } },
+    { "actor": "helper1", "expect": { "t": "session", "session": { "id": "$sid1", "status": "active" } } },
+    { "actor": "helper1", "expect": { "t": "state", "sessionId": "$sid1", "rev": 0 } },
+
+    { "comment": "Activar la 2 pausa la 1 (invariante: como mucho una activa)", "actor": "mago", "send": { "t": "session.activate", "id": "c-6", "sessionId": "$sid2" } },
+    { "actor": "mago", "expect": { "t": "session", "session": { "id": "$sid1", "status": "paused" } } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-6", "session": { "id": "$sid2", "status": "active" } } },
+    { "actor": "mago", "expect": { "t": "state", "sessionId": "$sid2", "rev": 0 } },
+    { "actor": "helper1", "expect": { "t": "session", "session": { "id": "$sid1", "status": "paused" } } },
+    { "actor": "helper2", "expect": { "t": "session", "session": { "id": "$sid2", "status": "active" } } },
+    { "actor": "helper2", "expect": { "t": "state", "sessionId": "$sid2", "rev": 0 } },
+
+    { "comment": "Solo escribe el controlador de la sesión activa", "actor": "helper1", "send": { "t": "patch", "id": "h-1", "sessionId": "$sid1", "patch": { "a": 1 } } },
+    { "actor": "helper1", "expect": { "t": "error", "ref": "h-1", "code": "not_active" } },
+    { "actor": "helper2", "send": { "t": "patch", "id": "g-1", "sessionId": "$sid1", "patch": { "a": 1 } } },
+    { "actor": "helper2", "expect": { "t": "error", "ref": "g-1", "code": "forbidden" } },
+    { "actor": "helper2", "send": { "t": "patch", "id": "g-2", "sessionId": "$sid2", "patch": { "a": 1 } } },
+    { "actor": "helper2", "expect": { "t": "ack", "ref": "g-2", "rev": 1 } },
+    { "actor": "mago", "expect": { "t": "patch", "sessionId": "$sid2", "rev": 1, "prevRev": 0 } },
+
+    { "comment": "Solo el mago gestiona sesiones; el ayudante no puede", "actor": "helper2", "send": { "t": "session.create", "id": "g-3", "name": "Intruso" } },
+    { "actor": "helper2", "expect": { "t": "error", "ref": "g-3", "code": "forbidden" } },
+    { "actor": "helper2", "send": { "t": "session.activate", "id": "g-4", "sessionId": "$sid1" } },
+    { "actor": "helper2", "expect": { "t": "error", "ref": "g-4", "code": "forbidden" } },
+    { "actor": "mago", "send": { "t": "patch", "id": "c-7", "sessionId": "$sid2", "patch": { "a": 2 } } },
+    { "actor": "mago", "expect": { "t": "error", "ref": "c-7", "code": "forbidden" } },
+    { "actor": "mago", "send": { "t": "session.activate", "id": "c-8", "sessionId": "sesion-que-no-existe" } },
+    { "actor": "mago", "expect": { "t": "error", "ref": "c-8", "code": "not_found" } },
+
+    { "comment": "Revocar: el controlador pierde el acceso", "actor": "mago", "send": { "t": "session.revoke", "id": "c-9", "sessionId": "$sid2" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-9", "session": { "id": "$sid2", "status": "revoked", "hasController": false } } },
+    { "actor": "helper2", "expect": { "t": "session.removed", "sessionId": "$sid2", "reason": "revoked" } },
+    { "actor": "helper2", "send": { "t": "patch", "id": "g-5", "sessionId": "$sid2", "patch": { "a": 3 } } },
+    { "actor": "helper2", "expect": { "t": "error", "ref": "g-5", "code": "forbidden" } },
+    { "actor": "mago", "send": { "t": "pairing.code", "id": "c-10", "sessionId": "$sid2" } },
+    { "actor": "mago", "expect": { "t": "error", "ref": "c-10", "code": "forbidden" } },
+    { "actor": "mago", "send": { "t": "session.activate", "id": "c-11", "sessionId": "$sid2" } },
+    { "actor": "mago", "expect": { "t": "error", "ref": "c-11", "code": "forbidden" } },
+
+    { "comment": "Borrar", "actor": "mago", "send": { "t": "session.delete", "id": "c-12", "sessionId": "$sid1" } },
+    { "actor": "mago", "expect": { "t": "ack", "ref": "c-12" } },
+    { "actor": "helper1", "expect": { "t": "session.removed", "sessionId": "$sid1", "reason": "deleted" } },
+    { "actor": "mago", "send": { "t": "sync", "id": "c-13", "sessionId": "$sid1" } },
+    { "actor": "mago", "expect": { "t": "error", "ref": "c-13", "code": "not_found" } }
+  ]
+}

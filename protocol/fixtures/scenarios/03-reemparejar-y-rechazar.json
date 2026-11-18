@@ -1,0 +1,53 @@
+{
+  "name": "Rechazar una solicitud y re-emparejar sustituyendo al controlador",
+  "actors": {
+    "mago": { "role": "mago" },
+    "helper1": { "role": "helper" },
+    "helper2": { "role": "helper" }
+  },
+  "steps": [
+    { "actor": "mago", "hello": {} },
+    { "actor": "mago", "expect": { "t": "welcome" } },
+    { "actor": "mago", "send": { "t": "session.create", "id": "c-1", "name": "Sesión" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-1", "session": { "id": "$>sid" } } },
+    { "actor": "mago", "expect": { "t": "pairing", "ref": "c-1", "code": "$>code1" } },
+
+    { "actor": "helper1", "join": { "code": "$code1", "label": "Uno" }, "expectHttp": { "status": 200, "body": { "requestId": "$>rid1" } } },
+    { "actor": "mago", "expect": { "t": "pairing.request", "request": { "requestId": "$rid1" } } },
+    { "actor": "helper1", "hello": {} },
+    { "actor": "helper1", "expect": { "t": "welcome", "pending": [ { "requestId": "$rid1" } ] } },
+
+    { "comment": "El código es de un solo uso", "actor": "helper2", "join": { "code": "$code1" },
+      "expectHttp": { "status": 404, "body": { "code": "bad_code" } } },
+
+    { "actor": "mago", "send": { "t": "pairing.reject", "id": "c-2", "requestId": "$rid1" } },
+    { "actor": "mago", "expect": { "t": "ack", "ref": "c-2" } },
+    { "actor": "helper1", "expect": { "t": "pairing.result", "requestId": "$rid1", "accepted": false } },
+    { "actor": "mago", "send": { "t": "pairing.accept", "id": "c-3", "requestId": "$rid1" } },
+    { "actor": "mago", "expect": { "t": "error", "ref": "c-3", "code": "not_found" } },
+
+    { "comment": "Segundo intento: ahora sí se acepta", "actor": "mago", "send": { "t": "pairing.code", "id": "c-4", "sessionId": "$sid" } },
+    { "actor": "mago", "expect": { "t": "pairing", "ref": "c-4", "sessionId": "$sid", "code": "$>code2" } },
+    { "actor": "helper1", "join": { "code": "$code2", "label": "Uno" }, "expectHttp": { "status": 200, "body": { "requestId": "$>rid2" } } },
+    { "actor": "mago", "expect": { "t": "pairing.request", "request": { "requestId": "$rid2" } } },
+    { "actor": "mago", "send": { "t": "pairing.accept", "id": "c-5", "requestId": "$rid2" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-5", "session": { "hasController": true, "controllerLabel": "Uno" } } },
+    { "actor": "helper1", "expect": { "t": "pairing.result", "accepted": true } },
+    { "actor": "helper1", "expect": { "t": "session", "session": { "id": "$sid" } } },
+
+    { "comment": "Re-emparejar: un código nuevo para la misma sesión sustituye al controlador", "actor": "mago", "send": { "t": "pairing.code", "id": "c-6", "sessionId": "$sid" } },
+    { "actor": "mago", "expect": { "t": "pairing", "ref": "c-6", "code": "$>code3" } },
+    { "actor": "helper2", "join": { "code": "$code3", "label": "Dos" }, "expectHttp": { "status": 200, "body": { "requestId": "$>rid3" } } },
+    { "actor": "mago", "expect": { "t": "pairing.request", "request": { "requestId": "$rid3", "label": "Dos" } } },
+    { "actor": "helper2", "hello": {} },
+    { "actor": "helper2", "expect": { "t": "welcome", "sessions": [], "pending": [ { "requestId": "$rid3" } ] } },
+    { "actor": "mago", "send": { "t": "pairing.accept", "id": "c-7", "requestId": "$rid3" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-7", "session": { "hasController": true, "controllerLabel": "Dos" } } },
+    { "actor": "helper2", "expect": { "t": "pairing.result", "accepted": true } },
+    { "actor": "helper2", "expect": { "t": "session", "session": { "id": "$sid" } } },
+    { "actor": "helper1", "expect": { "t": "session.removed", "sessionId": "$sid", "reason": "replaced" } },
+
+    { "actor": "helper1", "send": { "t": "patch", "id": "h-1", "sessionId": "$sid", "patch": { "a": 1 } } },
+    { "actor": "helper1", "expect": { "t": "error", "ref": "h-1", "code": "forbidden" } }
+  ]
+}
