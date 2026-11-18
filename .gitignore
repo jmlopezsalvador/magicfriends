@@ -1,0 +1,23 @@
+# Secretos (el repo es público)
+.dev.vars
+.env
+.env.*
+*.pem
+*.key
+
+# Cloudflare / Node
+node_modules/
+.wrangler/
+dist/
+
+# Gradle / Kotlin
+.gradle/
+build/
+local.properties
+*.iml
+
+# IDE / sistema
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
