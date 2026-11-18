@@ -3,6 +3,8 @@ declare namespace Cloudflare {
   interface Env {
     MAGO: DurableObjectNamespace<import("./mago.ts").MagoDO>;
     DIRECTORY: DurableObjectNamespace<import("./directory.ts").DirectoryDO>;
+    /** Secreto compartido de las apps (wrangler secret). Si falta, no se exige (desarrollo local). */
+    APP_SECRET?: string;
   }
 }
 interface Env extends Cloudflare.Env {}

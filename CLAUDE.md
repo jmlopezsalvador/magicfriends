@@ -26,6 +26,9 @@ No re-discutir lo decidido; ante un choque, consultar al usuario.
 - Tests del servidor: `cd server && npm test` (schema/fixtures en Node + escenarios en el runtime de Workers).
 - Cliente de consola (con el servidor en marcha): `node tools/cli/mf.ts mago` y, en otra terminal, `node tools/cli/mf.ts ayudante`;
   la identidad de cada perfil se guarda en `~/.magicfriends-cli/` (fuera del repo).
+- Despliegue (solo si el usuario lo pide): `cd server && npx wrangler deploy` con `CLOUDFLARE_API_TOKEN` y
+  `CLOUDFLARE_ACCOUNT_ID` en el entorno. El secreto `APP_SECRET` se sube con `wrangler secret put` (nunca al repo); el CLI lo
+  lee de `~/.magicfriends-cli/app-key.txt`, `MF_APP_KEY` o `--app-key`.
 - Formato de los escenarios de `protocol/fixtures/scenarios/`: ver el final de `protocol/PROTOCOLO.md`.
 
 ## Relación con las apps

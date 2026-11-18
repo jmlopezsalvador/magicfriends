@@ -40,6 +40,11 @@ let profile: Profile = existsSync(file)
 const save = () => writeFileSync(file, JSON.stringify(profile, null, 2));
 save();
 
+// Secreto compartido de las apps (solo hace falta para registrar un mago nuevo en un servidor que lo exija).
+// Orden: --app-key, variable MF_APP_KEY o el archivo ~/.magicfriends-cli/app-key.txt (fuera del repo).
+const appKeyFile = join(dir, "app-key.txt");
+const appKey = flag("app-key", process.env.MF_APP_KEY ?? (existsSync(appKeyFile) ? readFileSync(appKeyFile, "utf8").trim() : "")) || undefined;
+
 // ---- Estado local --------------------------------------------------------------------------
 
 let sessions: SessionInfo[] = [];
@@ -124,7 +129,7 @@ function connect() {
   const url = wsUrl();
   ws = new WebSocket(url);
   ws.addEventListener("open", () =>
-    send({ t: "hello", role, deviceId: profile.deviceId, deviceKey: profile.deviceKey,
+    send({ t: "hello", role, deviceId: profile.deviceId, deviceKey: profile.deviceKey, appKey: role === "mago" ? appKey : undefined,
       knownRevs: Object.fromEntries([...state].map(([id, s]) => [id, s.rev])) }));
   ws.addEventListener("message", (e) => onMessage(JSON.parse(String(e.data))));
   ws.addEventListener("close", (e) => {

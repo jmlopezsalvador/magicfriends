@@ -16,6 +16,16 @@ export function safeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+/**
+ * Comprueba el secreto compartido de las apps. Si el servidor no tiene APP_SECRET (desarrollo local), no se exige.
+ * Se compara el sha256 de ambos para no filtrar la longitud ni comparar en tiempo variable.
+ */
+export async function appKeyAllowed(secret: string | undefined, provided: string | undefined): Promise<boolean> {
+  if (!secret) return true;
+  if (!provided) return false;
+  return safeEqual(await sha256Hex(secret), await sha256Hex(provided));
+}
+
 export function newId(): string {
   return crypto.randomUUID();
 }

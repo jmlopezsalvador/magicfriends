@@ -16,6 +16,9 @@ build/
 local.properties
 *.iml
 
+# Configuración local de Claude Code (permisos personales)
+.claude/settings.local.json
+
 # IDE / sistema
 .idea/
 .vscode/

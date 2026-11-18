@@ -26,7 +26,9 @@ conoce los ajustes de ninguna app, solo guarda y reenvía JSON.
    guarda el hash). Un **Directory DO singleton** traduce código → mago (no guarda ajustes ni sesiones; limita intentos
    por IP). `expired` es **reversible** (quitar o alargar la caducidad la devuelve a `paused`); `revoked` es definitivo.
    Se puede **re-emparejar** una sesión: un código nuevo, al aceptarlo, sustituye al ayudante anterior. Código de
-   emparejamiento: 6 caracteres de un alfabeto de 31 símbolos (sin 0, O, 1, I, L), un solo uso, 10 min.
+   **Secreto compartido de las apps** (`appKey` en `hello`, `APP_SECRET` como secreto de Cloudflare): se exige solo para
+   registrar un mago nuevo; evita altas casuales en el servidor público (protección débil, va dentro de las apps).
+   Código de emparejamiento: 6 caracteres de un alfabeto de 31 símbolos (sin 0, O, 1, I, L), un solo uso, 10 min.
 
 ## Modelo de ajustes: local, remoto y efectivo (lado app)
 

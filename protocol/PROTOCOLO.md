@@ -11,6 +11,10 @@ Fuente de verdad del contrato entre servidor y clientes. Los tipos exactos está
 - Identidad **anónima por dispositivo**: `deviceId` (aleatorio, 16–64 caracteres `[A-Za-z0-9_-]`) y `deviceKey`
   (aleatoria, ≥ 32 caracteres, p. ej. 32 bytes en base64url). El servidor solo guarda `sha256(deviceKey)`.
 - La primera conexión de un `magoId` registra su clave (*trust on first use*); a partir de ahí hay que presentar la misma.
+- **Secreto compartido de las apps (`appKey`, opcional en `hello`).** Si el servidor tiene configurado `APP_SECRET`,
+  exige `appKey` igual a él solo para **registrar un mago nuevo**; si no coincide, `error bad_auth`. Los magos ya
+  registrados y los ayudantes no lo necesitan. Sin `APP_SECRET` (desarrollo local) no se exige. No es una protección
+  fuerte (va dentro de las apps): solo evita altas casuales en un servidor público.
 
 ## Transporte
 

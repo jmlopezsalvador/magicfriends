@@ -94,6 +94,10 @@
           "role": { "enum": ["mago", "helper"] },
           "deviceId": { "$ref": "#/$defs/DeviceId" },
           "deviceKey": { "$ref": "#/$defs/DeviceKey" },
+          "appKey": {
+            "description": "Opcional. Secreto compartido de las apps: el servidor lo exige solo para registrar un mago nuevo (si tiene APP_SECRET configurado).",
+            "type": "string", "minLength": 1, "maxLength": 128
+          },
           "knownRevs": {
             "description": "Opcional: última rev conocida por sesión; el servidor omite el state si coincide.",
             "type": "object",

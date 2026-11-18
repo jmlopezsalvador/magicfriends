@@ -2,7 +2,7 @@ import { exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { MAX_FAILED_ATTEMPTS } from "../src/directory.ts";
 import { CODE_ALPHABET, RE_CODE } from "../src/protocol.ts";
-import { mergePatch, newPairingCode } from "../src/util.ts";
+import { appKeyAllowed, mergePatch, newPairingCode } from "../src/util.ts";
 
 describe("mergePatch (RFC 7396)", () => {
   it("fusiona objetos, quita con null y sustituye arrays", () => {
@@ -13,6 +13,18 @@ describe("mergePatch (RFC 7396)", () => {
     const out = mergePatch({}, JSON.parse('{"__proto__": {"polluted": true}, "ok": 1}')) as Record<string, unknown>;
     expect(out.ok).toBe(1);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+});
+
+describe("appKeyAllowed (secreto compartido de las apps)", () => {
+  it("no exige nada si el servidor no tiene APP_SECRET", async () => {
+    expect(await appKeyAllowed(undefined, undefined)).toBe(true);
+    expect(await appKeyAllowed("", "lo-que-sea")).toBe(true);
+  });
+  it("exige coincidencia exacta si hay APP_SECRET", async () => {
+    expect(await appKeyAllowed("s3cr3to", "s3cr3to")).toBe(true);
+    expect(await appKeyAllowed("s3cr3to", "otro")).toBe(false);
+    expect(await appKeyAllowed("s3cr3to", undefined)).toBe(false);
   });
 });
 

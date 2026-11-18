@@ -3,7 +3,7 @@ import {
   PROTOCOL_VERSION, validateClientMessage,
   type ClientMessage, type ErrorCode, type JsonObject, type PendingRequest, type Role, type SessionInfo, type Status,
 } from "./protocol.ts";
-import { mergePatch, newId, safeEqual, sha256Hex } from "./util.ts";
+import { appKeyAllowed, mergePatch, newId, safeEqual, sha256Hex } from "./util.ts";
 
 export const MAX_FRAME_BYTES = 32 * 1024;
 export const MAX_PATCH_BYTES = 4 * 1024;
@@ -167,8 +167,11 @@ export class MagoDO extends DurableObject<Env> {
     if (msg.role === "mago") {
       if (msg.deviceId !== att.magoId) return badAuth();
       const stored = this.getMeta("mago_key_hash");
-      if (stored === null) this.setMeta("mago_key_hash", keyHash); // primer uso: se registra la clave
-      else if (!safeEqual(stored, keyHash)) return badAuth();
+      if (stored === null) {
+        // Primer uso: se registra la clave, pero solo con el secreto compartido de las apps (si está configurado).
+        if (!(await appKeyAllowed(this.env.APP_SECRET, msg.appKey))) return badAuth();
+        this.setMeta("mago_key_hash", keyHash);
+      } else if (!safeEqual(stored, keyHash)) return badAuth();
     } else {
       const controls = sql.exec<{ n: number }>(
         "SELECT COUNT(*) AS n FROM sessions WHERE controller_id = ? AND controller_key_hash = ?", msg.deviceId, keyHash).one().n;

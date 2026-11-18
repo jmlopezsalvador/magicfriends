@@ -35,7 +35,7 @@ export interface PendingRequest {
 
 interface Base { v: 1; id?: string }
 export type ClientMessage =
-  | (Base & { t: "hello"; role: Role; deviceId: string; deviceKey: string; knownRevs?: Record<string, number> })
+  | (Base & { t: "hello"; role: Role; deviceId: string; deviceKey: string; appKey?: string; knownRevs?: Record<string, number> })
   | (Base & { t: "session.create"; name: string; expiresAt?: number | null })
   | (Base & { t: "pairing.code"; sessionId: string })
   | (Base & { t: "pairing.accept"; requestId: string })
@@ -95,6 +95,9 @@ export function validateClientMessage(raw: unknown): Validation<ClientMessage> {
       if (raw.role !== "mago" && raw.role !== "helper") return fail("'role' inválido");
       if (!isStr(raw.deviceId, RE_DEVICE_ID)) return fail("'deviceId' inválido");
       if (!isStr(raw.deviceKey, RE_DEVICE_KEY)) return fail("'deviceKey' inválida");
+      if (raw.appKey !== undefined && (typeof raw.appKey !== "string" || raw.appKey.length < 1 || raw.appKey.length > 128)) {
+        return fail("'appKey' inválida");
+      }
       if (raw.knownRevs !== undefined) {
         if (!isObject(raw.knownRevs)) return fail("'knownRevs' inválido");
         for (const r of Object.values(raw.knownRevs)) {
