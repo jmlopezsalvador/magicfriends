@@ -12,6 +12,7 @@ dist/
 
 # Gradle / Kotlin
 .gradle/
+.kotlin/
 build/
 local.properties
 *.iml

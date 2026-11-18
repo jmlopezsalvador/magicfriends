@@ -95,6 +95,8 @@ docs/
 
 0. Protocolo + servidor + cliente de pruebas de línea de comandos (sin móviles). Validar el Durable Object por mago.
 1. Librería KMP + Chronix como mago: recibe, solapa y activa/desactiva.
+   *Estado (2026-11-18):* la librería `client/` está hecha y probada (JVM + Android compilado + extremo a extremo contra el
+   servidor; iOS pendiente de Actions). Falta la integración en Chronix, que se hace en la sesión de Chronix.
 2. Chronix como ayudante (reutilizando la pantalla de forzaje) y lectura del ajuste efectivo en el último instante.
 3. Pausa/reactivación, revocación, caducidad, caché offline y QR.
 4. Segunda app (Calculadora o ListApp) para demostrar que es agnóstico.

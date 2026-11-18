@@ -26,6 +26,9 @@ No re-discutir lo decidido; ante un choque, consultar al usuario.
 - Tests del servidor: `cd server && npm test` (schema/fixtures en Node + escenarios en el runtime de Workers).
 - Cliente de consola (con el servidor en marcha): `node tools/cli/mf.ts mago` y, en otra terminal, `node tools/cli/mf.ts ayudante`;
   la identidad de cada perfil se guarda en `~/.magicfriends-cli/` (fuera del repo).
+- Cliente KMP: `cd client && ./gradlew jvmTest` (tests comunes + fixtures) y `./gradlew compileDebugKotlinAndroid`; con el servidor
+  local en marcha, `MF_SERVER_URL=http://localhost:8787 ./gradlew jvmTest` ejecuta además la prueba de extremo a extremo.
+  iOS (`iosMain`) solo compila en un Mac: avisar al usuario de que su primer fallo se verá en Actions. Ver `client/README.md`.
 - Despliegue (solo si el usuario lo pide): `cd server && npx wrangler deploy` con `CLOUDFLARE_API_TOKEN` y
   `CLOUDFLARE_ACCOUNT_ID` en el entorno. El secreto `APP_SECRET` se sube con `wrangler secret put` (nunca al repo); el CLI lo
   lee de `~/.magicfriends-cli/app-key.txt`, `MF_APP_KEY` o `--app-key`.
