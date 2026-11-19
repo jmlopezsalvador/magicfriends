@@ -45,6 +45,7 @@ export type ClientMessage =
   | (Base & { t: "session.revoke"; sessionId: string })
   | (Base & { t: "session.update"; sessionId: string; name?: string; expiresAt?: number | null })
   | (Base & { t: "session.delete"; sessionId: string })
+  | (Base & { t: "session.leave"; sessionId: string })
   | (Base & { t: "patch"; sessionId: string; patch: JsonObject })
   | (Base & { t: "sync"; sessionId: string })
   | (Base & { t: "ping" });
@@ -116,6 +117,7 @@ export function validateClientMessage(raw: unknown): Validation<ClientMessage> {
     case "session.pause":
     case "session.revoke":
     case "session.delete":
+    case "session.leave":
     case "sync":
       return needId() ?? needSession() ?? ok();
     case "session.update":

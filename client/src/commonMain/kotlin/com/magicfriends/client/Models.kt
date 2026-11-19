@@ -40,6 +40,9 @@ data class PendingRequest(
 /** Código de un solo uso para que el ayudante se una a una sesión. */
 data class PairingCode(val sessionId: String, val code: String, val expiresAt: Long)
 
+/** Resultado de [MagicFriendsClient.join]: a qué mago y sesión se ha unido el ayudante (queda pendiente de que el mago acepte). */
+data class JoinResult(val magoId: String, val requestId: String, val sessionId: String, val sessionName: String)
+
 data class CreatedSession(val session: Session, val pairing: PairingCode)
 
 /** Instantánea de los ajustes de una sesión tal como la guarda el servidor. */
@@ -63,8 +66,10 @@ sealed interface ClientEvent {
     data class PairingRequested(val request: PendingRequest) : ClientEvent
     /** (Ayudante) El mago aceptó o rechazó la solicitud. */
     data class PairingResult(val requestId: String, val accepted: Boolean, val sessionId: String?) : ClientEvent
-    /** La sesión ya no es visible para este dispositivo (`deleted`, `revoked` o `replaced`). */
+    /** La sesión ya no es visible para este dispositivo (`deleted`, `revoked`, `replaced` o `left`, cuando el propio ayudante se sale). */
     data class SessionRemoved(val sessionId: String, val reason: String) : ClientEvent
+    /** (Mago) Un `state` ha cambiado los ajustes remotos de la sesión activa (p. ej. al activarla con plantilla o al salirse el ayudante). */
+    data class SettingsChanged(val sessionId: String, val rev: Long) : ClientEvent
     /** Error no asociado a una petición concreta. */
     data class ServerError(val code: String, val message: String) : ClientEvent
 }

@@ -43,7 +43,7 @@ interface RequestRow extends Record<string, SqlStorageValue> {
   created_at: number;
 }
 
-export type JoinResult = { ok: true; requestId: string } | { ok: false; code: ErrorCode; message: string };
+export type JoinResult = { ok: true; requestId: string; sessionName: string } | { ok: false; code: ErrorCode; message: string };
 
 type Out = Record<string, unknown> & { t: string };
 
@@ -110,7 +110,7 @@ export class MagoDO extends DurableObject<Env> {
     sql.exec("INSERT INTO join_requests(id, session_id, helper_id, helper_key_hash, label, created_at) VALUES (?, ?, ?, ?, ?, ?)",
       requestId, sessionId, deviceId, keyHash, label, at);
     this.sendToMago({ t: "pairing.request", request: { requestId, sessionId, label, at } satisfies PendingRequest });
-    return { ok: true, requestId };
+    return { ok: true, requestId, sessionName: s.name };
   }
 
   async alarm(): Promise<void> {
@@ -369,6 +369,22 @@ export class MagoDO extends DurableObject<Env> {
         return;
       }
 
+      case "session.leave": {
+        if (mago) return forbid("Solo el ayudante se sale de una sesión");
+        const s = this.getSession(msg.sessionId);
+        if (!s) return this.sendError(ws, msg.id, "not_found", "Sesión inexistente");
+        if (!this.isController(s, att)) return forbid("No eres el controlador de esta sesión");
+        // Se quita al controlador y se BORRAN los ajustes (la plantilla); la sesión sigue existiendo.
+        sql.exec(`UPDATE sessions SET controller_id = NULL, controller_key_hash = NULL, controller_label = NULL,
+                  settings = '{}', rev = ?, updated_at = ? WHERE id = ?`, s.rev + 1, now, s.id);
+        const updated = this.getSession(s.id)!;
+        this.send(ws, { t: "ack", ref: msg.id });
+        this.sendToMago({ t: "session", session: toInfo(updated) });
+        if (updated.status === "active") this.sendToMago(stateMsg(updated));
+        this.sendToHelper(att.deviceId!, { t: "session.removed", sessionId: s.id, reason: "left" });
+        return;
+      }
+
       case "sync": {
         const s = this.getSession(msg.sessionId);
         if (!s) return this.sendError(ws, msg.id, "not_found", "Sesión inexistente");
@@ -383,7 +399,8 @@ export class MagoDO extends DurableObject<Env> {
         if (!s) return this.sendError(ws, msg.id, "not_found", "Sesión inexistente");
         if (!this.isController(s, att)) return forbid("No eres el controlador de esta sesión");
         if (s.status === "expired") return this.sendError(ws, msg.id, "expired", "La sesión ha caducado");
-        if (s.status !== "active") return this.sendError(ws, msg.id, "not_active", "La sesión no está activa");
+        // Se admite también en pausa (la plantilla se prepara antes de activar); no en expired ni revoked.
+        if (s.status !== "active" && s.status !== "paused") return this.sendError(ws, msg.id, "not_active", "La sesión no admite cambios");
         if (!this.allowPatch(ws, now)) return this.sendError(ws, msg.id, "rate_limited", "Demasiados parches por segundo");
         if (JSON.stringify(msg.patch).length > MAX_PATCH_BYTES) return this.sendError(ws, msg.id, "too_large", "Parche demasiado grande");
         const merged = JSON.stringify(mergePatch(JSON.parse(s.settings), msg.patch));
@@ -391,7 +408,8 @@ export class MagoDO extends DurableObject<Env> {
         const rev = s.rev + 1;
         sql.exec("UPDATE sessions SET settings = ?, rev = ?, updated_at = ? WHERE id = ?", merged, rev, now, s.id);
         this.send(ws, { t: "ack", ref: msg.id, rev });
-        this.sendToMago({ t: "patch", sessionId: s.id, rev, prevRev: s.rev, patch: msg.patch });
+        // En pausa el mago no lo recibe ni lo aplica; al activarla recibe el `state` completo.
+        if (s.status === "active") this.sendToMago({ t: "patch", sessionId: s.id, rev, prevRev: s.rev, patch: msg.patch });
         return;
       }
     }

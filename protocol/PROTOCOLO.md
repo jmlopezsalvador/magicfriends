@@ -1,4 +1,4 @@
-# Protocolo Magic Friends — v1
+# Protocolo Magic Friends — v1 (revisión aditiva 0.2)
 
 Fuente de verdad del contrato entre servidor y clientes. Los tipos exactos están en
 [`schema/messages.schema.json`](schema/messages.schema.json); los ejemplos y escenarios, en [`fixtures/`](fixtures/).
@@ -35,6 +35,8 @@ Un mensaje inválido recibe `error` (`bad_message`; `unsupported_version` si `v`
 `active` (como mucho una por mago) · `paused` · `expired` · `revoked`.
 
 - Se crea en `paused`. Activar una pausa la activa anterior (invariante garantizada por la base de datos).
+- Con la sesión `paused` el controlador **sí puede editar la plantilla** (`patch`); el mago no la recibe ni la aplica hasta
+  activarla (entonces recibe el `state` completo).
 - `expired`: se alcanza `expiresAt` (la comprueba una alarma del Durable Object). **Reversible**: `session.update` con
   `expiresAt` nulo o futuro la devuelve a `paused`. No se puede activar ni parchear estando caducada.
 - `revoked`: **definitivo**; el controlador pierde el acceso.
@@ -54,8 +56,14 @@ Un mensaje inválido recibe `error` (`bad_message`; `unsupported_version` si `v`
 | `session.update` | mago | `sessionId`, `name?`, `expiresAt?` | `session` |
 | `session.delete` | mago | `sessionId` | `ack` |
 | `patch` | ayudante | `sessionId`, `patch` | `ack` con `rev` |
+| `session.leave` | ayudante (controlador) | `sessionId` | `ack`, y después `session.removed` (`left`) |
 | `sync` | ambos | `sessionId` | `state` |
 | `ping` | ambos | — | `pong` |
+
+`session.leave`: el controlador de la sesión se sale. Se le quita el control y **se borran los ajustes de la sesión**
+(`settings = {}`, `rev + 1`); la sesión sigue existiendo (`paused`/`active`/`expired`) y se puede volver a emparejar. Solo lo envía
+el controlador: el mago u otro ayudante reciben `forbidden` (`not_found` si la sesión no existe). Tras salir, el dispositivo
+ya no puede autenticarse contra ese mago (`bad_auth`) salvo que tenga otra sesión o solicitud pendiente con él.
 
 El mago solo ve sus sesiones; el ayudante, solo aquellas de las que es controlador.
 
@@ -65,13 +73,16 @@ El mago solo ve sus sesiones; el ayudante, solo aquellas de las que es controlad
 `pairing.result`, `pong`. Orden de los envíos derivados de cada comando (lo fijan los escenarios):
 
 - `hello`: `welcome` y después un `state` por cada sesión **activa** cuya `rev` difiera de `knownRevs`.
+  El servidor no empuja el `state` de sesiones no activas: el ayudante que quiera la plantilla de una sesión `paused`/`expired` la pide con `sync`.
 - `pairing.accept`: mago ← `session`. Ayudante nuevo ← `pairing.result`, `session` (y `state` si la sesión está activa).
   Ayudante anterior (re-emparejado) ← `session.removed` (`replaced`).
 - `session.activate`: mago ← `session` de la sesión pausada (si había), `session` de la activada (con `ref`), `state`.
   Cada controlador afectado ← su `session` (y `state` el de la activada).
 - `session.revoke`: mago ← `session`; controlador ← `session.removed` (`revoked`).
 - `session.delete`: mago ← `ack`; controlador ← `session.removed` (`deleted`).
-- `patch` válido: ayudante ← `ack`; mago ← `patch`.
+- `patch` válido: ayudante ← `ack`; mago ← `patch` **solo si la sesión está `active`** (en `paused` se guarda y el mago no recibe nada).
+- `session.leave`: ayudante ← `ack`, `session.removed` (`left`). Mago ← `session` (`hasController: false`, `rev` nueva) y, si la sesión
+  estaba `active`, un `state` con `settings: {}` para que deje de aplicar la plantilla.
 - Caducidad: mago y controlador ← `session` con `status: "expired"`.
 
 ## Ajustes y parches
@@ -80,8 +91,8 @@ El mago solo ve sus sesiones; el ayudante, solo aquellas de las que es controlad
 - `patch` es un **JSON Merge Patch (RFC 7396)**: `null` quita la clave (la app vuelve al valor local), los objetos se
   fusionan y los arrays se sustituyen enteros. Cada parche sube `rev` en 1.
 - El mago aplica `patch` si `prevRev` coincide con su `rev` local; si no, envía `sync` y sustituye todo por el `state`.
-- Solo se acepta `patch` del controlador de una sesión `active`: si no, `forbidden` (no es el controlador),
-  `not_active` o `expired`.
+- Solo se acepta `patch` del controlador de una sesión `active` o `paused`: si no, `forbidden` (no es el controlador),
+  `expired` o `not_active` (`revoked`).
 
 ## Emparejamiento
 
@@ -90,7 +101,8 @@ El mago solo ve sus sesiones; el ayudante, solo aquellas de las que es controlad
    `pairing.code` genera otro para una sesión existente (también sirve para **re-emparejar**: al aceptar, el nuevo
    ayudante sustituye al anterior). Un código nuevo invalida el anterior de esa sesión.
 2. El ayudante hace `POST /v1/join` con el código (se normaliza a mayúsculas), su `deviceId`, `deviceKey` y una etiqueta.
-   Recibe `magoId` y `requestId`; el código queda consumido. Puede conectar por WebSocket mientras la solicitud está pendiente.
+   Recibe `magoId`, `requestId`, `sessionId` y `sessionName` (los dos últimos, aditivos de la 0.2: el ayudante sabe a qué sesión
+   se une sin esperar al mago); el código queda consumido. Puede conectar por WebSocket mientras la solicitud está pendiente.
 3. El mago recibe `pairing.request` (o la ve en `welcome.pending` si estaba desconectado) y envía `pairing.accept`/`reject`.
 
 ## Límites
@@ -102,12 +114,12 @@ El mago solo ve sus sesiones; el ayudante, solo aquellas de las que es controlad
 | Sesiones por mago | 20 (`limit_reached`) |
 | Solicitudes de emparejamiento pendientes por sesión | 5 |
 | Intentos de código fallidos | 10 por IP cada 10 minutos (`rate_limited`) |
-| Conexiones simultáneas | un mago; ayudantes: una por dispositivo, máximo 3. Una nueva del mismo rol/dispositivo sustituye a la anterior |
+| Conexiones simultáneas | por mago: un mago; ayudantes: una por dispositivo, máximo 3. Una nueva del mismo rol/dispositivo sustituye a la anterior. Un ayudante con varios magos abre una conexión por mago (`/v1/ws?m=<magoId>`) con la misma identidad |
 
 ## Compatibilidad y pruebas
 
 - `messages.json` (casos válidos e inválidos) y `scenarios/*.json` (conversaciones completas) los ejecutan el servidor
-  (`server/test`) y, más adelante, `commonTest` del cliente KMP.
+  (`server/test`); `messages.json` también `commonTest` del cliente KMP.
 - Formato de escenario: `actors` (`role`, y opcionalmente `as`, `key`, `mago`), y `steps` con `hello`, `send`, `expect`,
   `join` + `expectHttp`, `close`, `expectClose`, `expectNothing`, `sleep`. En los valores: `"$nombre"` sustituye una
   captura, `"$>nombre"` captura el valor recibido, `"$any"` acepta cualquier valor, `"$absent"` exige que la clave no

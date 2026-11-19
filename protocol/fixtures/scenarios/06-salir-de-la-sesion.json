@@ -1,0 +1,72 @@
+{
+  "name": "El ayudante se sale de una sesión (activa y pausada): se borra la plantilla y la sesión sigue",
+  "actors": {
+    "mago": { "role": "mago" },
+    "helper": { "role": "helper" }
+  },
+  "steps": [
+    { "actor": "mago", "hello": {} },
+    { "actor": "mago", "expect": { "t": "welcome", "sessions": [], "pending": [] } },
+    { "actor": "mago", "send": { "t": "session.create", "id": "c-1", "name": "Función" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-1", "session": { "id": "$>sid" } } },
+    { "actor": "mago", "expect": { "t": "pairing", "ref": "c-1", "code": "$>code1" } },
+
+    { "comment": "join devuelve también la sesión y su nombre", "actor": "helper", "join": { "code": "$code1", "label": "Ayudante" },
+      "expectHttp": { "status": 200, "body": { "requestId": "$>rid1", "magoId": "$any", "sessionId": "$sid", "sessionName": "Función" } } },
+    { "actor": "mago", "expect": { "t": "pairing.request", "request": { "requestId": "$rid1" } } },
+    { "actor": "helper", "hello": {} },
+    { "actor": "helper", "expect": { "t": "welcome", "pending": [ { "requestId": "$rid1" } ] } },
+    { "actor": "mago", "send": { "t": "pairing.accept", "id": "c-2", "requestId": "$rid1" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-2", "session": { "id": "$sid", "hasController": true } } },
+    { "actor": "helper", "expect": { "t": "pairing.result", "accepted": true } },
+    { "actor": "helper", "expect": { "t": "session", "session": { "id": "$sid" } } },
+
+    { "comment": "Sesión activa con plantilla", "actor": "mago", "send": { "t": "session.activate", "id": "c-3", "sessionId": "$sid" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-3", "session": { "status": "active" } } },
+    { "actor": "mago", "expect": { "t": "state", "sessionId": "$sid", "rev": 0 } },
+    { "actor": "helper", "expect": { "t": "session", "session": { "status": "active" } } },
+    { "actor": "helper", "expect": { "t": "state", "sessionId": "$sid", "rev": 0 } },
+    { "actor": "helper", "send": { "t": "patch", "id": "h-1", "sessionId": "$sid", "patch": { "forcedCs": 4250 } } },
+    { "actor": "helper", "expect": { "t": "ack", "ref": "h-1", "rev": 1 } },
+    { "actor": "mago", "expect": { "t": "patch", "rev": 1, "prevRev": 0, "patch": { "forcedCs": 4250 } } },
+
+    { "comment": "Solo el controlador se sale: el mago recibe forbidden (el caso de otro ayudante está en el escenario 02)", "actor": "mago", "send": { "t": "session.leave", "id": "c-4", "sessionId": "$sid" } },
+    { "actor": "mago", "expect": { "t": "error", "ref": "c-4", "code": "forbidden" } },
+
+    { "comment": "Salir con la sesión activa: ack + session.removed(left); el mago recibe session y un state vacío", "actor": "helper", "send": { "t": "session.leave", "id": "h-2", "sessionId": "$sid" } },
+    { "actor": "helper", "expect": { "t": "ack", "ref": "h-2" } },
+    { "actor": "helper", "expect": { "t": "session.removed", "sessionId": "$sid", "reason": "left" } },
+    { "actor": "mago", "expect": { "t": "session", "session": { "id": "$sid", "status": "active", "hasController": false, "rev": 2 } } },
+    { "actor": "mago", "expect": { "t": "state", "sessionId": "$sid", "rev": 2, "settings": { "forcedCs": "$absent" } } },
+
+    { "comment": "Ya no es controlador: no puede escribir ni volver a salir", "actor": "helper", "send": { "t": "patch", "id": "h-3", "sessionId": "$sid", "patch": { "a": 1 } } },
+    { "actor": "helper", "expect": { "t": "error", "ref": "h-3", "code": "forbidden" } },
+    { "actor": "helper", "send": { "t": "session.leave", "id": "h-4", "sessionId": "$sid" } },
+    { "actor": "helper", "expect": { "t": "error", "ref": "h-4", "code": "forbidden" } },
+
+    { "comment": "La sesión sigue existiendo: se vuelve a emparejar y la plantilla empieza vacía", "actor": "mago", "send": { "t": "pairing.code", "id": "c-5", "sessionId": "$sid" } },
+    { "actor": "mago", "expect": { "t": "pairing", "ref": "c-5", "code": "$>code2" } },
+    { "actor": "helper", "join": { "code": "$code2", "label": "Ayudante" }, "expectHttp": { "status": 200, "body": { "requestId": "$>rid2", "sessionId": "$sid" } } },
+    { "actor": "mago", "expect": { "t": "pairing.request", "request": { "requestId": "$rid2" } } },
+    { "actor": "mago", "send": { "t": "pairing.accept", "id": "c-6", "requestId": "$rid2" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-6", "session": { "hasController": true } } },
+    { "actor": "helper", "expect": { "t": "pairing.result", "accepted": true } },
+    { "actor": "helper", "expect": { "t": "session", "session": { "id": "$sid", "status": "active" } } },
+    { "actor": "helper", "expect": { "t": "state", "sessionId": "$sid", "rev": 2, "settings": { "forcedCs": "$absent" } } },
+
+    { "comment": "Salir con la sesión pausada: el mago solo recibe session (no hay state)", "actor": "mago", "send": { "t": "session.pause", "id": "c-7", "sessionId": "$sid" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-7", "session": { "status": "paused" } } },
+    { "actor": "helper", "expect": { "t": "session", "session": { "status": "paused" } } },
+    { "actor": "helper", "send": { "t": "patch", "id": "h-5", "sessionId": "$sid", "patch": { "a": 1 } } },
+    { "actor": "helper", "expect": { "t": "ack", "ref": "h-5", "rev": 3 } },
+    { "actor": "helper", "send": { "t": "session.leave", "id": "h-6", "sessionId": "$sid" } },
+    { "actor": "helper", "expect": { "t": "ack", "ref": "h-6" } },
+    { "actor": "helper", "expect": { "t": "session.removed", "sessionId": "$sid", "reason": "left" } },
+    { "actor": "mago", "expect": { "t": "session", "session": { "id": "$sid", "status": "paused", "hasController": false, "rev": 4 } } },
+    { "actor": "mago", "expectNothing": true },
+
+    { "comment": "Al activarla, el mago recibe la plantilla ya vacía", "actor": "mago", "send": { "t": "session.activate", "id": "c-8", "sessionId": "$sid" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-8", "session": { "status": "active" } } },
+    { "actor": "mago", "expect": { "t": "state", "sessionId": "$sid", "rev": 4, "settings": { "a": "$absent" } } }
+  ]
+}

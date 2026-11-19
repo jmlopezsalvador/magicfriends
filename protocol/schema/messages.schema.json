@@ -81,6 +81,7 @@
         { "$ref": "#/$defs/c_session_revoke" },
         { "$ref": "#/$defs/c_session_update" },
         { "$ref": "#/$defs/c_session_delete" },
+        { "$ref": "#/$defs/c_session_leave" },
         { "$ref": "#/$defs/c_patch" },
         { "$ref": "#/$defs/c_sync" },
         { "$ref": "#/$defs/c_ping" }
@@ -167,6 +168,13 @@
     "c_session_delete": {
       "allOf": [{ "$ref": "#/$defs/Envelope" }, {
         "properties": { "t": { "const": "session.delete" }, "sessionId": { "$ref": "#/$defs/SessionId" } },
+        "required": ["id", "sessionId"]
+      }]
+    },
+    "c_session_leave": {
+      "allOf": [{ "$ref": "#/$defs/Envelope" }, {
+        "description": "Ayudante → servidor. El controlador se sale: se le quita y se borran los ajustes de la sesión.",
+        "properties": { "t": { "const": "session.leave" }, "sessionId": { "$ref": "#/$defs/SessionId" } },
         "required": ["id", "sessionId"]
       }]
     },
@@ -273,7 +281,7 @@
         "properties": {
           "t": { "const": "session.removed" },
           "sessionId": { "$ref": "#/$defs/SessionId" },
-          "reason": { "enum": ["deleted", "revoked", "replaced"] }
+          "reason": { "enum": ["deleted", "revoked", "replaced", "left"] }
         },
         "required": ["sessionId", "reason"]
       }]
@@ -330,7 +338,9 @@
       "required": ["magoId", "requestId"],
       "properties": {
         "magoId": { "$ref": "#/$defs/DeviceId" },
-        "requestId": { "$ref": "#/$defs/RequestId" }
+        "requestId": { "$ref": "#/$defs/RequestId" },
+        "sessionId": { "$ref": "#/$defs/SessionId" },
+        "sessionName": { "$ref": "#/$defs/Name" }
       }
     },
     "HttpErrorBody": {

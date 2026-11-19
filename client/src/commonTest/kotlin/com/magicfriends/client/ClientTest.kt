@@ -1,5 +1,11 @@
 package com.magicfriends.client
 
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.headersOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
@@ -19,12 +25,14 @@ import kotlin.test.assertTrue
 /** Transporte falso: el test escribe en [inbox] lo que «envía el servidor» y lee en [sent] lo que envía el cliente. */
 private class FakeTransport : MfTransport {
     val sent = mutableListOf<String>()
+    val urls = mutableListOf<String>()
     var inbox = Channel<String>(Channel.UNLIMITED)
     var connects = 0
     var failConnect = false
 
     override suspend fun run(url: String, onOpen: suspend (suspend (String) -> Unit) -> Unit, onMessage: suspend (String) -> Unit) {
         connects++
+        urls += url
         if (failConnect) throw RuntimeException("sin red")
         onOpen { sent += it }
         for (m in inbox) onMessage(m)
@@ -51,6 +59,19 @@ class ClientTest {
         now: () -> Long = { 5_000L },
         scope: CoroutineScope = backgroundScope,
     ) = MagicFriendsClient(Role.MAGO, "https://example.test", store, scope, appKey = "secreto", transport = t, clock = now)
+
+    private fun TestScope.helper(
+        t: FakeTransport,
+        store: KeyValueStore = InMemoryKeyValueStore(),
+        magoId: String? = "dev-mago-0000000001",
+        http: HttpClient? = null,
+    ) = MagicFriendsClient(Role.HELPER, "https://example.test", store, backgroundScope, magoId = magoId, transport = t, httpClient = http, clock = { 1L })
+
+    private fun helperWelcome(vararg sessions: String) =
+        """{"v":1,"t":"welcome","role":"helper","serverTime":1,"sessions":[${sessions.joinToString(",")}],"pending":[]}"""
+
+    private fun jsonResponse(body: String, status: HttpStatusCode = HttpStatusCode.OK) =
+        HttpClient(MockEngine { respond(body, status, headersOf(HttpHeaders.ContentType, "application/json")) })
 
     @Test
     fun elHelloLlevaIdentidadYAppKey() = runTest {
@@ -293,7 +314,7 @@ class ClientTest {
     @Test
     fun elAyudanteEnviaParchesYRecuerdaElEstado() = runTest {
         val t = FakeTransport()
-        val c = MagicFriendsClient(Role.HELPER, "https://example.test", InMemoryKeyValueStore().also { it.putString("mf.helper.magoId", "dev-mago-0000000001") }, backgroundScope, transport = t, clock = { 1L })
+        val c = helper(t, magoId = "dev-mago-0000000001")
         c.start(); runCurrent()
         assertEquals("helper", t.lastSent().getValue("role").jsonPrimitive.content)
         t.inbox.send("""{"v":1,"t":"welcome","role":"helper","serverTime":1,"sessions":[${session(rev = 1)}],"pending":[]}""")
@@ -317,5 +338,171 @@ class ClientTest {
         c.start(); runCurrent()
         assertEquals(0, t.connects)
         assertEquals(ConnectionState.Idle, c.connection.value)
+    }
+
+    // ---- v0.2: ayudante con lista de conexiones ----
+
+    @Test
+    fun elAyudanteConectaAlMagoIndicado() = runTest {
+        val t = FakeTransport()
+        val c = helper(t, magoId = "dev-mago-0000000042")
+        c.start(); runCurrent()
+        assertTrue(t.urls.single().endsWith("/v1/ws?m=dev-mago-0000000042"), t.urls.single())
+        assertEquals("dev-mago-0000000042", c.magoId)
+    }
+
+    @Test
+    fun variosClientesDelAyudanteCompartenIdentidadSiCompartenAlmacen() = runTest {
+        val store = InMemoryKeyValueStore()
+        val a = helper(FakeTransport(), store, magoId = "dev-mago-0000000001")
+        val b = helper(FakeTransport(), store, magoId = "dev-mago-0000000002")
+        assertEquals(a.deviceId, b.deviceId)
+    }
+
+    @Test
+    fun joinDevuelveElResultadoYNoCambiaNiConectaElCliente() = runTest {
+        val t = FakeTransport()
+        val c = helper(t, magoId = null, http = jsonResponse(
+            """{"magoId":"dev-mago-0000000007","requestId":"req-0001-aaaa","sessionId":"sess-0001-aaaa","sessionName":"Función del sábado"}"""))
+        val r = c.join(" k7qx4m ", "Ayudante").getOrThrow()
+        assertEquals(JoinResult("dev-mago-0000000007", "req-0001-aaaa", "sess-0001-aaaa", "Función del sábado"), r)
+        runCurrent()
+        assertEquals(null, c.magoId, "join no elige el mago por su cuenta")
+        assertEquals(0, t.connects, "join no conecta")
+        c.start(); runCurrent()
+        assertEquals(0, t.connects, "sin mago no hay a qué conectar")
+    }
+
+    @Test
+    fun joinConUnCodigoMalDevuelveElErrorDelServidor() = runTest {
+        val c = helper(FakeTransport(), magoId = null, http = jsonResponse("""{"code":"bad_code","message":"no"}""", HttpStatusCode.NotFound))
+        assertEquals("bad_code", (c.join("AAAAAA").exceptionOrNull() as MfException).code)
+    }
+
+    @Test
+    fun salirDeUnaSesionLaQuitaDeLaListaYAvisa() = runTest {
+        val t = FakeTransport()
+        val c = helper(t)
+        val events = mutableListOf<ClientEvent>()
+        backgroundScope.launch { c.events.collect { events += it } }
+        c.start(); runCurrent()
+        t.inbox.send(helperWelcome(session(rev = 1), session(id = "sess-0002-bbbb", rev = 0)))
+        t.inbox.send(state(1, """{"a":1}"""))
+        runCurrent()
+
+        var result: Result<Unit>? = null
+        backgroundScope.launch { result = c.leaveSession("sess-0001-aaaa") }
+        runCurrent()
+        val req = t.lastSent()
+        assertEquals("session.leave", req.getValue("t").jsonPrimitive.content)
+        assertEquals("sess-0001-aaaa", req.getValue("sessionId").jsonPrimitive.content)
+        val id = req.getValue("id").jsonPrimitive.content
+        t.inbox.send("""{"v":1,"t":"ack","ref":"$id"}""")
+        t.inbox.send("""{"v":1,"t":"session.removed","sessionId":"sess-0001-aaaa","reason":"left"}""")
+        runCurrent()
+        result!!.getOrThrow()
+        assertEquals(listOf("sess-0002-bbbb"), c.sessions.value.map { it.id })
+        assertTrue("sess-0001-aaaa" !in c.helperState.value)
+        assertTrue(events.any { it is ClientEvent.SessionRemoved && it.sessionId == "sess-0001-aaaa" && it.reason == "left" })
+    }
+
+    @Test
+    fun salirSinSerControladorFallaConForbidden() = runTest {
+        val t = FakeTransport()
+        val c = helper(t)
+        c.start(); runCurrent()
+        t.inbox.send(helperWelcome(session()))
+        runCurrent()
+        var result: Result<Unit>? = null
+        backgroundScope.launch { result = c.leaveSession("sess-0001-aaaa") }
+        runCurrent()
+        val id = t.lastSent().getValue("id").jsonPrimitive.content
+        t.inbox.send("""{"v":1,"t":"error","ref":"$id","code":"forbidden","message":"no"}""")
+        runCurrent()
+        assertEquals("forbidden", (result!!.exceptionOrNull() as MfException).code)
+        assertEquals(1, c.sessions.value.size, "Si falla, la sesión se conserva")
+    }
+
+    @Test
+    fun elAyudantePideLaPlantillaDeLasSesionesNoActivas() = runTest {
+        val t = FakeTransport()
+        val c = helper(t)
+        c.start(); runCurrent()
+        t.inbox.send(helperWelcome(session(status = "paused", rev = 3)))
+        runCurrent()
+        val sync = t.lastSent()
+        assertEquals("sync", sync.getValue("t").jsonPrimitive.content)
+        assertEquals("sess-0001-aaaa", sync.getValue("sessionId").jsonPrimitive.content)
+        t.inbox.send("""{"v":1,"t":"state","ref":"${sync.getValue("id").jsonPrimitive.content}","sessionId":"sess-0001-aaaa","rev":3,"settings":{"forcedCs":4250}}""")
+        runCurrent()
+        assertEquals(RemoteState(3, obj("""{"forcedCs":4250}""")), c.helperState.value["sess-0001-aaaa"])
+
+        // Con la plantilla ya al día, un nuevo mensaje de sesión no repite el sync.
+        val enviados = t.sent.size
+        t.inbox.send("""{"v":1,"t":"session","session":${session(status = "paused", rev = 3)}}""")
+        runCurrent()
+        assertEquals(enviados, t.sent.size)
+    }
+
+    @Test
+    fun alEditarEnPausaElAyudanteVeSuPlantilla() = runTest {
+        val t = FakeTransport()
+        val c = helper(t)
+        c.start(); runCurrent()
+        t.inbox.send(helperWelcome(session(status = "paused", rev = 0)))
+        t.inbox.send(state(0, "{}"))
+        runCurrent()
+        var result: Result<Long>? = null
+        backgroundScope.launch { result = c.sendPatch("sess-0001-aaaa", obj("""{"forcedCs":4250}""")) }
+        runCurrent()
+        t.inbox.send("""{"v":1,"t":"ack","ref":"${t.lastSent().getValue("id").jsonPrimitive.content}","rev":1}""")
+        runCurrent()
+        assertEquals(1L, result!!.getOrThrow())
+        assertEquals(RemoteState(1, obj("""{"forcedCs":4250}""")), c.helperState.value["sess-0001-aaaa"])
+    }
+
+    @Test
+    fun borrarUnaSesionLaQuitaDeLaListaYLimpiaLaInstantanea() = runTest {
+        val t = FakeTransport()
+        val c = mago(t)
+        c.start(); runCurrent()
+        t.inbox.send(welcome(session(rev = 1))); t.inbox.send(state(1, """{"a":1}"""))
+        runCurrent()
+        assertEquals(obj("""{"a":1}"""), c.currentRemoteSettings())
+
+        var result: Result<Unit>? = null
+        backgroundScope.launch { result = c.deleteSession("sess-0001-aaaa") }
+        runCurrent()
+        t.inbox.send("""{"v":1,"t":"ack","ref":"${t.lastSent().getValue("id").jsonPrimitive.content}"}""")
+        runCurrent()
+        result!!.getOrThrow()
+        assertEquals(0, c.sessions.value.size)
+        assertEquals(JsonObject(emptyMap()), c.currentRemoteSettings(), "Sin sesión no quedan ajustes remotos")
+    }
+
+    @Test
+    fun unStateQueCambiaLosAjustesDeLaSesionActivaEmiteEvento() = runTest {
+        val t = FakeTransport()
+        val c = mago(t)
+        val events = mutableListOf<ClientEvent>()
+        backgroundScope.launch { c.events.collect { events += it } }
+        c.start(); runCurrent()
+        t.inbox.send(welcome(session(rev = 2)))
+        t.inbox.send(state(2, """{"forcedCs":4250}"""))
+        runCurrent()
+        assertEquals(listOf(ClientEvent.SettingsChanged("sess-0001-aaaa", 2)), events.filterIsInstance<ClientEvent.SettingsChanged>())
+
+        // El mismo contenido (p. ej. al reconectar) no vuelve a avisar.
+        t.inbox.send(state(2, """{"forcedCs":4250}"""))
+        runCurrent()
+        assertEquals(1, events.filterIsInstance<ClientEvent.SettingsChanged>().size)
+
+        // El ayudante se sale de la sesión activa: state vacío → el mago deja de aplicar y se le avisa.
+        t.inbox.send("""{"v":1,"t":"session","session":${session(rev = 3, controller = false)}}""")
+        t.inbox.send(state(3, "{}"))
+        runCurrent()
+        assertEquals(JsonObject(emptyMap()), c.remoteSettings.value)
+        assertEquals(ClientEvent.SettingsChanged("sess-0001-aaaa", 3), events.filterIsInstance<ClientEvent.SettingsChanged>().last())
+        assertTrue(events.none { it is ClientEvent.RemotePatch })
     }
 }

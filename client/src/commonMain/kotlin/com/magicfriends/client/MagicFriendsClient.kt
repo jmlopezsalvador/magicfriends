@@ -17,8 +17,6 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.filterNotNull
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -38,13 +36,17 @@ import kotlinx.serialization.json.put
  *
  * **Mago:** lee los ajustes remotos con [remoteSettings] / [currentRemoteSettings] y gestiona las sesiones.
  * La app calcula el ajuste efectivo como `remoto[clave] ?: local[clave]` en el momento de usarlo.
- * **Ayudante:** se une con [join], observa [helperState] y envía parches con [sendPatch].
+ * **Ayudante:** se une con [join] (que NO conecta: la app decide a qué mago conectar creando un cliente con `magoId`),
+ * observa [helperState], envía parches con [sendPatch] y se sale de una conexión con [leaveSession].
+ * Un ayudante con varias conexiones (de uno o de varios magos) usa **un cliente por mago**, todos con el mismo
+ * [KeyValueStore]: así comparten `deviceId`/`deviceKey`.
  *
  * Sin red el efecto no puede fallar: la última instantánea se guarda en [KeyValueStore] y nunca se espera a la red.
  * La conexión se reintenta sola; no hace falta que la app la vigile.
  *
  * @param serverUrl base HTTP(S) del servicio, p. ej. `https://…workers.dev` (se convierte a `wss://` para el WebSocket).
  * @param appKey secreto compartido de las apps; solo lo necesita el mago la primera vez (registro).
+ * @param magoId (ayudante) mago al que conectar. `null`: ninguno (el cliente no conecta; sirve para [join]). Ignorado en el mago.
  * @param transport solo para tests; por defecto Ktor.
  */
 class MagicFriendsClient(
@@ -53,6 +55,7 @@ class MagicFriendsClient(
     private val store: KeyValueStore,
     private val scope: CoroutineScope,
     private val appKey: String? = null,
+    magoId: String? = null,
     private val transport: MfTransport? = null,
     httpClient: HttpClient? = null,
     private val clock: () -> Long = { Clock.System.now().toEpochMilliseconds() },
@@ -64,14 +67,14 @@ class MagicFriendsClient(
     // ---- Identidad anónima del dispositivo (una por rol) ----
     private val kDeviceId = "mf.${role.wire}.deviceId"
     private val kDeviceKey = "mf.${role.wire}.deviceKey"
-    private val kMagoId = "mf.${role.wire}.magoId"
+    private val kLegacyMagoId = "mf.helper.magoId" // 0.1.x lo guardaba al hacer join; se lee solo si no se indica magoId
     private val kSnapshot = "mf.mago.snapshot"
 
     val deviceId: String = store.getString(kDeviceId) ?: ("dev-" + base64Url(secureRandomBytes(16))).also { store.putString(kDeviceId, it) }
     private val deviceKey: String = store.getString(kDeviceKey) ?: base64Url(secureRandomBytes(32)).also { store.putString(kDeviceKey, it) }
 
-    /** Mago al que pertenece la conexión: el propio dispositivo (mago) o el emparejado (ayudante, tras [join]). */
-    private val magoId = MutableStateFlow<String?>(if (role == Role.MAGO) deviceId else store.getString(kMagoId))
+    /** Mago al que pertenece la conexión: el propio dispositivo (mago) o el indicado en el constructor (ayudante). */
+    val magoId: String? = if (role == Role.MAGO) deviceId else (magoId ?: store.getString(kLegacyMagoId))
 
     // ---- Estado observable ----
     private val _connection = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
@@ -112,6 +115,7 @@ class MagicFriendsClient(
     /** Inicia la conexión (y los reintentos). Idempotente. */
     fun start() {
         if (job?.isActive == true) return
+        if (magoId == null) return // ayudante sin mago: nada a lo que conectar
         authFailed = false
         job = scope.launch { connectionLoop() }
     }
@@ -127,7 +131,7 @@ class MagicFriendsClient(
     private suspend fun connectionLoop() {
         var backoff = INITIAL_BACKOFF_MS
         while (true) {
-            val mago = magoId.filterNotNull().first()
+            val mago = magoId ?: return
             _connection.value = ConnectionState.Connecting
             try {
                 val url = baseUrl.replaceFirst("http", "ws") + "/v1/ws?m=$mago"
@@ -230,7 +234,7 @@ class MagicFriendsClient(
             .expect<ServerMessage.SessionMsg>().map { it.session }
 
     suspend fun deleteSession(sessionId: String): Result<Unit> =
-        request("session.delete", setOf("ack")) { put("sessionId", sessionId) }.map { }
+        request("session.delete", setOf("ack")) { put("sessionId", sessionId) }.map { forgetSession(sessionId) }
 
     private suspend fun sessionCommand(type: String, sessionId: String): Result<Session> =
         request(type, setOf("session")) { put("sessionId", sessionId) }.expect<ServerMessage.SessionMsg>().map { it.session }
@@ -242,10 +246,11 @@ class MagicFriendsClient(
     // ---- Comandos del ayudante ----
 
     /**
-     * Canjea un código de emparejamiento (HTTP). Si el servidor lo acepta, queda pendiente de que el mago apruebe y
-     * la conexión arranca. Devuelve el `requestId`.
+     * Canjea un código de emparejamiento (HTTP). Si el servidor lo acepta, la solicitud queda pendiente de que el mago
+     * apruebe. **No cambia el mago de este cliente ni conecta**: la app decide a cuál conectar (normalmente creando un
+     * cliente nuevo con `magoId = resultado.magoId` y el mismo [KeyValueStore]) y guarda su lista de conexiones.
      */
-    suspend fun join(code: String, label: String? = null): Result<String> {
+    suspend fun join(code: String, label: String? = null): Result<JoinResult> {
         check(role == Role.HELPER) { "join solo lo usa el ayudante" }
         return try {
             val body = buildJsonObject {
@@ -264,12 +269,12 @@ class MagicFriendsClient(
                 Result.failure(MfException(json["code"]?.jsonPrimitive?.contentOrNull ?: "http_${response.status.value}",
                     json["message"]?.jsonPrimitive?.contentOrNull ?: "Error del servidor"))
             } else {
-                val mago = json.getValue("magoId").jsonPrimitive.content
-                store.putString(kMagoId, mago)
-                val changed = magoId.value != mago
-                magoId.value = mago
-                if (changed && job?.isActive == true) { stop(); start() } else start()
-                Result.success(json.getValue("requestId").jsonPrimitive.content)
+                Result.success(JoinResult(
+                    magoId = json.getValue("magoId").jsonPrimitive.content,
+                    requestId = json.getValue("requestId").jsonPrimitive.content,
+                    sessionId = json.getValue("sessionId").jsonPrimitive.content,
+                    sessionName = json.getValue("sessionName").jsonPrimitive.content,
+                ))
             }
         } catch (e: CancellationException) {
             throw e
@@ -277,6 +282,15 @@ class MagicFriendsClient(
             Result.failure(e)
         }
     }
+
+    /**
+     * (Ayudante) Se sale de la sesión: el servidor le quita el control y **borra los ajustes (la plantilla)**; la sesión
+     * sigue existiendo para el mago. La sesión desaparece de [sessions] y se emite [ClientEvent.SessionRemoved] con
+     * `reason = "left"`. Si era la última sesión con ese mago, la conexión ya no volverá a autenticarse: la app debe
+     * hacer [stop] de este cliente y quitarlo de su lista.
+     */
+    suspend fun leaveSession(sessionId: String): Result<Unit> =
+        request("session.leave", setOf("ack")) { put("sessionId", sessionId) }.map { forgetSession(sessionId) }
 
     /** Envía un JSON Merge Patch a la sesión activa que controlas. `null` en un valor quita el override. Devuelve la `rev`. */
     suspend fun sendPatch(sessionId: String, patch: JsonObject): Result<Long> {
@@ -302,13 +316,16 @@ class MagicFriendsClient(
                 _sessions.value = msg.sessions
                 _pending.value = msg.pending
                 if (role == Role.MAGO) reconcileSnapshot()
-                else _helperState.update { m -> m.filterKeys { id -> msg.sessions.any { it.id == id } } }
+                else {
+                    _helperState.update { m -> m.filterKeys { id -> msg.sessions.any { it.id == id } } }
+                    msg.sessions.forEach { syncIfMissing(it) }
+                }
                 _connection.value = ConnectionState.Connected
                 welcomed = true
             }
             is ServerMessage.SessionMsg -> {
                 _sessions.update { list -> if (list.any { it.id == msg.session.id }) list.map { if (it.id == msg.session.id) msg.session else it } else list + msg.session }
-                if (role == Role.MAGO) reconcileSnapshot()
+                if (role == Role.MAGO) reconcileSnapshot() else syncIfMissing(msg.session)
             }
             is ServerMessage.SessionRemoved -> {
                 _sessions.update { list -> list.filter { it.id != msg.sessionId } }
@@ -319,7 +336,11 @@ class MagicFriendsClient(
             is ServerMessage.State -> {
                 if (role == Role.MAGO) {
                     val s = _sessions.value.firstOrNull { it.id == msg.sessionId }
-                    if (s == null || s.status == SessionStatus.ACTIVE) setSnapshot(Snapshot(msg.sessionId, msg.rev, s?.expiresAt, msg.settings))
+                    if (s == null || s.status == SessionStatus.ACTIVE) {
+                        val before = snapshot?.takeIf { it.sessionId == msg.sessionId }?.settings ?: emptySettings
+                        setSnapshot(Snapshot(msg.sessionId, msg.rev, s?.expiresAt, msg.settings))
+                        if (before != msg.settings) _events.tryEmit(ClientEvent.SettingsChanged(msg.sessionId, msg.rev))
+                    }
                 } else {
                     _helperState.update { it + (msg.sessionId to RemoteState(msg.rev, msg.settings)) }
                 }
@@ -346,6 +367,26 @@ class MagicFriendsClient(
             if (w != null && (msg is ServerMessage.Error || msg.type in w.expect)) w.reply.complete(msg)
         }
         return welcomed
+    }
+
+    private var autoSyncCounter = 0L
+
+    /**
+     * (Ayudante) El servidor empuja el `state` solo de la sesión activa; de las demás (p. ej. pausadas) se pide la
+     * plantilla con `sync` para poder mostrarla y editarla sin esperar a activarla.
+     */
+    private suspend fun syncIfMissing(s: Session) {
+        if (role != Role.HELPER || s.status == SessionStatus.ACTIVE || s.status == SessionStatus.REVOKED) return
+        if (_helperState.value[s.id]?.rev == s.rev) return
+        sender?.invoke(clientMessage("sync", "a${++autoSyncCounter}") { put("sessionId", s.id) })
+    }
+
+    /** Quita de la memoria una sesión que ya no existe para este dispositivo (borrada, o abandonada por el ayudante). */
+    private fun forgetSession(sessionId: String) {
+        _sessions.update { list -> list.filter { it.id != sessionId } }
+        _pending.update { list -> list.filter { it.sessionId != sessionId } }
+        _helperState.update { it - sessionId }
+        if (role == Role.MAGO) reconcileSnapshot()
     }
 
     private suspend fun applyPatch(p: ServerMessage.Patch) {

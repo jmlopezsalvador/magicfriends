@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.magicfriends"
-version = "0.1.0"
+version = "0.2.0"
 
 // Versiones alineadas con las apps (Kotlin 2.0.21, JDK 17, iOS 15). Ktor 3.0.x se compila con Kotlin 2.0.
 val ktorVersion = "3.0.3"
@@ -28,7 +28,8 @@ kotlin {
         commonMain.dependencies {
             api("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion")
             api("org.jetbrains.kotlinx:kotlinx-serialization-json:$serializationVersion")
-            implementation("io.ktor:ktor-client-core:$ktorVersion")
+            // api: el constructor de MagicFriendsClient expone HttpClient.
+            api("io.ktor:ktor-client-core:$ktorVersion")
             implementation("io.ktor:ktor-client-websockets:$ktorVersion")
             implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.1")
         }
@@ -37,6 +38,7 @@ kotlin {
         jvmMain.dependencies { implementation("io.ktor:ktor-client-cio:$ktorVersion") }
         commonTest.dependencies {
             implementation(kotlin("test"))
+            implementation("io.ktor:ktor-client-mock:$ktorVersion")
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:$coroutinesVersion")
         }
     }

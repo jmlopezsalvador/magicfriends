@@ -43,6 +43,10 @@
       "message": { "v": 1, "t": "session.update", "id": "c-7", "sessionId": "sess-0001-aaaa", "name": "Nuevo nombre", "expiresAt": null } },
     { "name": "session.delete", "def": "ClientMessage", "valid": true,
       "message": { "v": 1, "t": "session.delete", "id": "c-8", "sessionId": "sess-0001-aaaa" } },
+    { "name": "session.leave", "def": "ClientMessage", "valid": true,
+      "message": { "v": 1, "t": "session.leave", "id": "h-9", "sessionId": "sess-0001-aaaa" } },
+    { "name": "session.leave sin sessionId", "def": "ClientMessage", "valid": false,
+      "message": { "v": 1, "t": "session.leave", "id": "h-9" } },
     { "name": "patch con null (quita override)", "def": "ClientMessage", "valid": true,
       "message": { "v": 1, "t": "patch", "id": "c-9", "sessionId": "sess-0001-aaaa", "patch": { "forcedCs": 4250, "stopSubmode": null } } },
     { "name": "patch que no es objeto", "def": "ClientMessage", "valid": false,
@@ -76,6 +80,8 @@
       "message": { "v": 1, "t": "session", "ref": "c-1", "session": { "id": "sess-0001-aaaa", "name": "Función", "status": "paused", "expiresAt": 1893456000000, "hasController": false, "rev": 0, "createdAt": 1789000000000, "updatedAt": 1789000000000 } } },
     { "name": "session.removed", "def": "ServerMessage", "valid": true,
       "message": { "v": 1, "t": "session.removed", "sessionId": "sess-0001-aaaa", "reason": "replaced" } },
+    { "name": "session.removed por salida del ayudante", "def": "ServerMessage", "valid": true,
+      "message": { "v": 1, "t": "session.removed", "sessionId": "sess-0001-aaaa", "reason": "left" } },
     { "name": "pairing", "def": "ServerMessage", "valid": true,
       "message": { "v": 1, "t": "pairing", "ref": "c-1", "sessionId": "sess-0001-aaaa", "code": "K7QX4M", "expiresAt": 1789000600000 } },
     { "name": "pairing con código de alfabeto prohibido (O)", "def": "ServerMessage", "valid": false,
@@ -92,6 +98,8 @@
     { "name": "join body con código corto", "def": "JoinRequestBody", "valid": false,
       "message": { "code": "K7Q", "deviceId": "dev-helper-00000001", "deviceKey": "helper_key_0123456789_0123456789_0123456789" } },
     { "name": "join response", "def": "JoinResponseBody", "valid": true,
+      "message": { "magoId": "dev-mago-0000000001", "requestId": "req-0001-aaaa", "sessionId": "sess-0001-aaaa", "sessionName": "Función del sábado" } },
+    { "name": "join response de un servidor anterior (sin sessionId)", "def": "JoinResponseBody", "valid": true,
       "message": { "magoId": "dev-mago-0000000001", "requestId": "req-0001-aaaa" } }
   ]
 }

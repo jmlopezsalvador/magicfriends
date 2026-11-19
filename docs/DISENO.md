@@ -30,6 +30,15 @@ conoce los ajustes de ninguna app, solo guarda y reenvía JSON.
    registrar un mago nuevo; evita altas casuales en el servidor público (protección débil, va dentro de las apps).
    Código de emparejamiento: 6 caracteres de un alfabeto de 31 símbolos (sin 0, O, 1, I, L), un solo uso, 10 min.
 
+7. **Ayudante con lista de conexiones (v0.2, 2026-11-19).** El ayudante tiene una lista de conexiones (sesiones a las que se ha
+   unido, del mismo mago o de varios): elige una, entra, ve su estado y su **plantilla** (los ajustes guardados en esa sesión), y
+   puede **salirse** (`session.leave`). Decisiones: (a) la **plantilla es editable en pausa** (el `patch` se acepta con la sesión
+   `paused`; el mago no lo recibe hasta activarla y entonces recibe el `state` completo; sigue rechazado en `expired`/`revoked`);
+   (b) **salir borra la plantilla** (`settings = {}`, `rev + 1`) y quita al controlador, pero la sesión sigue existiendo para el mago y
+   se puede volver a emparejar; si estaba activa, el mago recibe un `state` vacío y deja de aplicarla. En la librería: un cliente por
+   mago (`magoId`) con `KeyValueStore` compartido (misma identidad), `join` devuelve `JoinResult` y no conecta por su cuenta, y la
+   lista de conexiones la guarda cada app. Protocolo sigue en v1 (cambios aditivos).
+
 ## Modelo de ajustes: local, remoto y efectivo (lado app)
 
 - Cada app declara una **lista blanca de claves remotas**. En Chronix: `forceMode`, `forceTarget`, `forcedCs`,
@@ -98,6 +107,7 @@ docs/
    *Estado (2026-11-18):* la librería `client/` está hecha y probada (JVM + Android compilado + extremo a extremo contra el
    servidor; iOS pendiente de Actions). Falta la integración en Chronix, que se hace en la sesión de Chronix.
 2. Chronix como ayudante (reutilizando la pantalla de forzaje) y lectura del ajuste efectivo en el último instante.
+   *Estado (2026-11-19):* la librería 0.2.0 ya ofrece lo necesario para el ayudante con lista de conexiones (ver decisión 7).
 3. Pausa/reactivación, revocación, caducidad, caché offline y QR.
 4. Segunda app (Calculadora o ListApp) para demostrar que es agnóstico.
 

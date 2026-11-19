@@ -31,7 +31,7 @@ async function handleJoin(request: Request, env: Env): Promise<Response> {
   const mago = env.MAGO.get(env.MAGO.idFromName(resolved.magoId));
   const result = await mago.join(resolved.sessionId, deviceId, await sha256Hex(deviceKey), label ?? null);
   if (!result.ok) return error(result.code, result.message);
-  return json(200, { magoId: resolved.magoId, requestId: result.requestId });
+  return json(200, { magoId: resolved.magoId, requestId: result.requestId, sessionId: resolved.sessionId, sessionName: result.sessionName });
 }
 
 function handleWs(request: Request, env: Env): Response | Promise<Response> {

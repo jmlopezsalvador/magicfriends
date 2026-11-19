@@ -172,25 +172,26 @@ const AYUDA_MAGO = `Comandos del mago:
   caducidad <n> <minutos|no> cambia o quita la caducidad
   nombre <n> <texto>         renombra
   estado <n>                 pide los ajustes actuales (sync)
-  ping | ayuda | salir`;
+  ping | ayuda | salir (cierra el programa)`;
 const AYUDA_AYUDANTE = `Comandos del ayudante:
   unirse <codigo> [etiqueta] canjea un código de emparejamiento y conecta
   sesiones | estado <n>      lista sesiones / pide los ajustes (sync)
   poner <clave> <json>       parche de una clave, p. ej. poner forcedCs 4250
   quitar <clave>             quita el override (null)
+  salir <n>                  abandona la sesión n: se borra su plantilla (sin número, cierra el programa)
   patch <json>               parche completo, p. ej. patch {"forceMode":"target","forcedCs":4250}
-  ping | ayuda | salir`;
+  ping | ayuda`;
 
 async function unirse(code: string, label: string | undefined) {
   const res = await fetch(`${baseUrl}/v1/join`, {
     method: "POST",
     body: JSON.stringify({ code: code.toUpperCase(), deviceId: profile.deviceId, deviceKey: profile.deviceKey, label }),
   });
-  const body = (await res.json()) as { magoId?: string; requestId?: string; code?: string; message?: string };
+  const body = (await res.json()) as { magoId?: string; requestId?: string; sessionId?: string; sessionName?: string; code?: string; message?: string };
   if (!res.ok) return log(`\x1b[31mNo se pudo unir (${res.status} ${body.code})\x1b[0m: ${body.message}`);
   profile = { ...profile, magoId: body.magoId };
   save();
-  log("Solicitud enviada; esperando a que el mago la acepte.");
+  log(`Solicitud enviada para «${body.sessionName ?? "?"}»; esperando a que el mago la acepte.`);
   ws?.close();
   connect();
 }
@@ -201,7 +202,14 @@ async function handle(line: string) {
   switch (c) {
     case "": return;
     case "ayuda": return log(role === "mago" ? AYUDA_MAGO : AYUDA_AYUDANTE);
-    case "salir": closing = true; ws?.close(); rl.close(); process.exit(0); break;
+    case "salir": {
+      // Ayudante: «salir <n>» abandona la sesión n (se borra su plantilla). Sin número, cierra el programa.
+      if (role === "helper" && args[0]) {
+        const s = sesion(args[0]);
+        return s && cmd({ t: "session.leave", sessionId: s.id });
+      }
+      closing = true; ws?.close(); rl.close(); process.exit(0); break;
+    }
     case "ping": return cmd({ t: "ping" });
     case "sesiones":
       return log(sessions.length ? sessions.map((s) => `  ${describe(s)}`).join("\n") : "  (ninguna)");

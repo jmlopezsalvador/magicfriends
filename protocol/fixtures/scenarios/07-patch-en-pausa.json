@@ -1,0 +1,50 @@
+{
+  "name": "El controlador edita la plantilla con la sesión pausada; se rechaza en expired y revoked",
+  "actors": {
+    "mago": { "role": "mago" },
+    "helper": { "role": "helper" }
+  },
+  "steps": [
+    { "actor": "mago", "hello": {} },
+    { "actor": "mago", "expect": { "t": "welcome", "sessions": [], "pending": [] } },
+    { "actor": "mago", "send": { "t": "session.create", "id": "c-1", "name": "Función" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-1", "session": { "id": "$>sid" } } },
+    { "actor": "mago", "expect": { "t": "pairing", "ref": "c-1", "code": "$>code" } },
+    { "actor": "helper", "join": { "code": "$code", "label": "Ayudante" }, "expectHttp": { "status": 200, "body": { "requestId": "$>rid" } } },
+    { "actor": "mago", "expect": { "t": "pairing.request", "request": { "requestId": "$rid" } } },
+    { "actor": "mago", "send": { "t": "pairing.accept", "id": "c-2", "requestId": "$rid" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-2", "session": { "hasController": true } } },
+    { "actor": "helper", "hello": {} },
+    { "actor": "helper", "expect": { "t": "welcome", "sessions": [ { "id": "$sid", "status": "paused" } ] } },
+
+    { "comment": "En pausa el patch se guarda (ack con rev) y el mago no recibe nada", "actor": "helper", "send": { "t": "patch", "id": "h-1", "sessionId": "$sid", "patch": { "forcedCs": 4250, "forceMode": "target" } } },
+    { "actor": "helper", "expect": { "t": "ack", "ref": "h-1", "rev": 1 } },
+    { "actor": "helper", "send": { "t": "patch", "id": "h-2", "sessionId": "$sid", "patch": { "forcedCs": 5000 } } },
+    { "actor": "helper", "expect": { "t": "ack", "ref": "h-2", "rev": 2 } },
+    { "actor": "mago", "expectNothing": true },
+
+    { "comment": "El helper puede leer la plantilla de una sesión pausada", "actor": "helper", "send": { "t": "sync", "id": "h-3", "sessionId": "$sid" } },
+    { "actor": "helper", "expect": { "t": "state", "ref": "h-3", "rev": 2, "settings": { "forcedCs": 5000, "forceMode": "target" } } },
+
+    { "comment": "Al activar, el mago recibe el state completo (no hace falta replay de parches)", "actor": "mago", "send": { "t": "session.activate", "id": "c-3", "sessionId": "$sid" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-3", "session": { "status": "active" } } },
+    { "actor": "mago", "expect": { "t": "state", "sessionId": "$sid", "rev": 2, "settings": { "forcedCs": 5000, "forceMode": "target" } } },
+    { "actor": "helper", "expect": { "t": "session", "session": { "status": "active" } } },
+    { "actor": "helper", "expect": { "t": "state", "sessionId": "$sid", "rev": 2 } },
+
+    { "comment": "Expired sigue rechazando patch", "actor": "mago", "send": { "t": "session.update", "id": "c-4", "sessionId": "$sid", "expiresAt": "$now+1500" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-4", "session": { "status": "active" } } },
+    { "actor": "helper", "expect": { "t": "session", "session": { "status": "active" } } },
+    { "sleep": 2500 },
+    { "actor": "mago", "expect": { "t": "session", "session": { "status": "expired" } } },
+    { "actor": "helper", "expect": { "t": "session", "session": { "status": "expired" } } },
+    { "actor": "helper", "send": { "t": "patch", "id": "h-4", "sessionId": "$sid", "patch": { "a": 1 } } },
+    { "actor": "helper", "expect": { "t": "error", "ref": "h-4", "code": "expired" } },
+
+    { "comment": "Revocada: el controlador ya no es controlador", "actor": "mago", "send": { "t": "session.revoke", "id": "c-5", "sessionId": "$sid" } },
+    { "actor": "mago", "expect": { "t": "session", "ref": "c-5", "session": { "status": "revoked" } } },
+    { "actor": "helper", "expect": { "t": "session.removed", "sessionId": "$sid", "reason": "revoked" } },
+    { "actor": "helper", "send": { "t": "patch", "id": "h-5", "sessionId": "$sid", "patch": { "a": 1 } } },
+    { "actor": "helper", "expect": { "t": "error", "ref": "h-5", "code": "forbidden" } }
+  ]
+}
